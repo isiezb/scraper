@@ -98,6 +98,10 @@ def init_db():
             -- Disambiguation fields
             geburtsjahr INTEGER,
             telefon TEXT,
+            email TEXT,
+            fax TEXT,
+            strasse TEXT,
+            schwerpunkte TEXT,
             -- Membership booleans (enrichment from societies)
             fmh_mitglied BOOLEAN,
             dgpraec_mitglied BOOLEAN,
@@ -107,7 +111,8 @@ def init_db():
             -- Collision tracking
             name_collision BOOLEAN DEFAULT FALSE,
             collision_group TEXT,
-            collision_resolved BOOLEAN DEFAULT FALSE
+            collision_resolved BOOLEAN DEFAULT FALSE,
+            quelle_url TEXT
         );
 
         CREATE TABLE IF NOT EXISTS spezialisierungen (
@@ -219,9 +224,14 @@ def init_db():
         ("dgaepc_mitglied", "BOOLEAN"),
         ("vdaepc_mitglied", "BOOLEAN"),
         ("isaps_mitglied", "BOOLEAN"),
+        ("email", "TEXT"),
+        ("fax", "TEXT"),
+        ("strasse", "TEXT"),
+        ("schwerpunkte", "TEXT"),
         ("name_collision", "BOOLEAN DEFAULT FALSE"),
         ("collision_group", "TEXT"),
         ("collision_resolved", "BOOLEAN DEFAULT FALSE"),
+        ("quelle_url", "TEXT"),
     ]
     for col_name, col_type in migration_cols:
         try:

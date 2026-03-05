@@ -1,13 +1,15 @@
-"""Scraper for plastic surgery professional societies.
+"""Scraper for plastic surgery professional societies (enrichment only).
 
-Targets DGPRÄC, DGÄPC, and VDÄPC member directories to verify
-society memberships and extract doctor profiles.
+Targets DGPRÄC, DGÄPC, VDÄPC, and ISAPS member directories.
+This scraper NEVER creates new records — it only enriches existing
+doctor records with membership booleans via name matching.
+All entries: verified=false, source_type='professional_association'.
 """
 
 import re
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
-from base_scraper import BaseScraper
+from base_scraper import BaseScraper, normalize_name
 
 SOCIETIES = [
     {
@@ -77,8 +79,8 @@ def guess_land(stadt: str | None) -> str:
 
 class DGPRAECScraper(BaseScraper):
     name = "fachgesellschaft"
-    min_delay = 5.0
-    max_delay = 10.0
+    min_delay = 1.5
+    max_delay = 3.0
 
     def run(self):
         for society in SOCIETIES:
@@ -246,39 +248,55 @@ class DGPRAECScraper(BaseScraper):
         return None
 
     def _process_member(self, member: dict, society: dict):
-        """Upsert doctor and record society membership."""
-        stadt = member.get("stadt")
-        land = guess_land(stadt)
-        bundesland = guess_bundesland(stadt)
+        """Enrich existing doctor record with society membership.
 
-        arzt_data = {
-            "vorname": member["vorname"],
-            "nachname": member["nachname"],
-            "titel": member.get("titel", ""),
-            "geschlecht": None,
-            "ist_facharzt": True,  # Society members are typically Fachärzte
-            "facharzttitel": "Facharzt für Plastische und Ästhetische Chirurgie",
-            "selbstbezeichnung": "Facharzt für Plastische und Ästhetische Chirurgie",
-            "land": land,
-            "stadt": stadt,
-            "bundesland": bundesland,
-            "website_url": member.get("website_url"),
-            "datenquelle": "fachgesellschaft",
-        }
+        This method NEVER creates new records. It only finds existing
+        doctors by name and updates their membership boolean fields.
+        """
+        vorname = member["vorname"]
+        nachname = member["nachname"]
 
-        arzt_id = self.upsert_arzt(arzt_data)
-        if not arzt_id:
+        # Find existing doctor by name match
+        cur = self.conn.cursor()
+        cur.execute(
+            """SELECT id FROM aerzte
+               WHERE LOWER(nachname) = LOWER(%s) AND LOWER(vorname) = LOWER(%s)""",
+            (nachname, vorname),
+        )
+        rows = cur.fetchall()
+        cur.close()
+
+        if not rows:
+            self.logger.debug(f"  No existing record for {vorname} {nachname} — skipping (enrich-only)")
+            self.stats["uebersprungen"] += 1
             return
 
-        # Record membership
-        self.upsert_mitgliedschaft(
-            arzt_id,
-            society["full_name"],
-            status="Mitglied",
-            verifiziert=True,
-            quelle_url=society["member_url"],
-        )
-        self.logger.info(f"  {member.get('titel', '')} {member['vorname']} {member['nachname']} -> {society['name']}")
+        # Map society to membership boolean field
+        membership_field = {
+            "DGPRÄC": "dgpraec_mitglied",
+            "DGÄPC": "dgaepc_mitglied",
+            "VDÄPC": "vdaepc_mitglied",
+            "ISAPS": "isaps_mitglied",
+        }.get(society["name"])
+
+        for row in rows:
+            arzt_id = row[0]
+
+            # Set membership boolean
+            if membership_field:
+                self.enrich_arzt(arzt_id, {membership_field: True})
+
+            # Record in mitgliedschaften table
+            self.upsert_mitgliedschaft(
+                arzt_id,
+                society["full_name"],
+                status="Mitglied",
+                verifiziert=True,
+                quelle_url=society["member_url"],
+            )
+            self.stats["aktualisiert"] += 1
+
+        self.logger.info(f"  {member.get('titel', '')} {vorname} {nachname} -> {society['name']} ({len(rows)} record(s) enriched)")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 [build]
-dockerfilePath = "scraper-service/Dockerfile"
+dockerfilePath = "Dockerfile"
 
 [deploy]
 restartPolicyType = "ON_FAILURE"

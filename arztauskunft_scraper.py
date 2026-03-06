@@ -121,6 +121,11 @@ class ArztAuskunftScraper(BaseScraper):
         # Get the display name from the link text or surrounding card
         display_name = link_el.get_text(strip=True)
 
+        # Skip navigation/generic links
+        skip_texts = {"mehr details", "details", "profil", "weiter", "mehr"}
+        if display_name.lower().strip() in skip_texts:
+            display_name = ""
+
         # Try to get more context from the parent card/container
         card = link_el.parent
         # Walk up to find a container with more content
@@ -134,6 +139,25 @@ class ArztAuskunftScraper(BaseScraper):
                 break
 
         card_text = card.get_text("\n", strip=True) if card else ""
+
+        # If display_name was generic, try to find the real name in card context
+        if not display_name or len(display_name) < 4:
+            # Look for a heading element in the card
+            if card:
+                for tag in ["h2", "h3", "h4", "strong", "b"]:
+                    heading = card.find(tag)
+                    if heading:
+                        candidate = heading.get_text(strip=True)
+                        if candidate.lower() not in skip_texts and len(candidate) >= 4:
+                            display_name = candidate
+                            break
+            # Still nothing? Try first line of card text
+            if not display_name or len(display_name) < 4:
+                for line in card_text.split("\n"):
+                    line = line.strip()
+                    if line.lower() not in skip_texts and len(line) >= 4:
+                        display_name = line
+                        break
 
         # Parse the display name
         name_data = self._extract_name(display_name)

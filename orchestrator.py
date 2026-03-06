@@ -37,10 +37,10 @@ logger = logging.getLogger("orchestrator")
 
 # Phase 1: these run in parallel (each creates its own DB connection)
 PARALLEL_SCRAPERS = [
-    MedRegScraper,        # CH: best data, GLN numbers (currently 503)
+    # MedRegScraper,        # CH: disabled — medregom.admin.ch returning 503
     AerztekammerScraper,  # DE: all 17 Landesärztekammern + DGPRÄC nationwide
     KBVScraper,           # DE: 116117.de — nationwide GKV-zugelassene Ärzte
-    OEGKScraper,          # AT: OEGK + ÖÄK cross-reference
+    # OEGKScraper,          # AT: disabled — returns 0 results, Playwright too slow
 ]
 
 # Phase 2: enrichment only, must run after Phase 1

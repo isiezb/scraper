@@ -173,8 +173,8 @@ def _gen_req_val(lat: float, lon: float) -> str:
 
 class KBVScraper(BaseScraper):
     name = "kbv_116117"
-    min_delay = 2.0
-    max_delay = 4.0
+    min_delay = 1.0
+    max_delay = 2.0
 
     def __init__(self):
         super().__init__()

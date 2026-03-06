@@ -114,8 +114,10 @@ class AerztekammerScraper(BaseScraper):
                 self.logger.error(f"Failed {kammer['name']}: {e}")
             self.wait()
 
-        # Scrape DGPRÄC for nationwide coverage (replaces 116117.de)
+        # Scrape professional societies for nationwide coverage
         self._scrape_dgpraec()
+        self._scrape_vdaepc()
+        self._scrape_dgaepc()
 
         self.finalize()
 
@@ -746,6 +748,167 @@ class AerztekammerScraper(BaseScraper):
                     doctor["stadt"] = addr_parts[1]
 
         # Skip non-German entries (no 5-digit PLZ)
+        if not doctor.get("plz") or not re.match(r"\d{5}$", doctor.get("plz", "")):
+            return None
+
+        return doctor
+
+    # ── VDÄPC (WP Store Locator JSON API) ───────────────────────────
+
+    def _scrape_vdaepc(self):
+        """Scrape VDÄPC member directory — ~109 plastic surgeons."""
+        import requests as _requests
+
+        _, completed = self.get_progress("vdaepc")
+        if completed:
+            self.logger.info("VDÄPC: already completed, skipping")
+            return
+
+        self.logger.info("Scraping VDÄPC (nationwide)...")
+        try:
+            resp = _requests.get(
+                "https://www.vdaepc.de/wp-admin/admin-ajax.php",
+                params={"action": "store_search", "lat": "51.0", "lng": "10.0",
+                        "max_results": "500", "search_radius": "1000", "autoload": "1"},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            self.logger.error(f"  VDÄPC failed: {e}")
+            return
+
+        self.logger.info(f"  VDÄPC returned {len(data)} members")
+        count = 0
+        for entry in data:
+            try:
+                doctor = self._parse_wpsl_entry(entry)
+                if doctor:
+                    plz = doctor.get("plz", "")
+                    bundesland = self.PLZ_TO_BUNDESLAND.get(plz[:2], "") if plz else ""
+                    kammer_info = {
+                        "name": "VDÄPC",
+                        "bundesland": bundesland,
+                        "search_url": "https://www.vdaepc.de/service-informationen/arztsuche/",
+                    }
+                    self._process_doctor(doctor, kammer_info)
+                    count += 1
+            except Exception as e:
+                self.logger.error(f"  Failed parsing VDÄPC entry: {e}")
+
+        self.save_progress("vdaepc", count, completed=True)
+        self.logger.info(f"  VDÄPC: processed {count} doctors")
+
+    # ── DGÄPC (WP Store Locator JSON API) ─────────────────────────
+
+    def _scrape_dgaepc(self):
+        """Scrape DGÄPC member directory — ~53 plastic surgeons."""
+        import requests as _requests
+
+        _, completed = self.get_progress("dgaepc")
+        if completed:
+            self.logger.info("DGÄPC: already completed, skipping")
+            return
+
+        self.logger.info("Scraping DGÄPC (nationwide)...")
+        try:
+            resp = _requests.get(
+                "https://www.dgaepc.de/wp-admin/admin-ajax.php",
+                params={"action": "store_search", "lat": "51.0", "lng": "10.0",
+                        "max_results": "500", "search_radius": "1000", "autoload": "1"},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            self.logger.error(f"  DGÄPC failed: {e}")
+            return
+
+        self.logger.info(f"  DGÄPC returned {len(data)} members")
+        count = 0
+        for entry in data:
+            try:
+                doctor = self._parse_wpsl_entry(entry)
+                if doctor:
+                    plz = doctor.get("plz", "")
+                    bundesland = self.PLZ_TO_BUNDESLAND.get(plz[:2], "") if plz else ""
+                    kammer_info = {
+                        "name": "DGÄPC",
+                        "bundesland": bundesland,
+                        "search_url": "https://www.dgaepc.de/mitgliedersuche/",
+                    }
+                    self._process_doctor(doctor, kammer_info)
+                    count += 1
+            except Exception as e:
+                self.logger.error(f"  Failed parsing DGÄPC entry: {e}")
+
+        self.save_progress("dgaepc", count, completed=True)
+        self.logger.info(f"  DGÄPC: processed {count} doctors")
+
+    def _parse_wpsl_entry(self, entry: dict) -> dict | None:
+        """Parse a WP Store Locator JSON entry (used by VDÄPC and DGÄPC)."""
+        store_name = (entry.get("store") or "").strip()
+        if not store_name or len(store_name) < 4:
+            return None
+
+        name_data = self._extract_name_from_text(store_name)
+        if not name_data:
+            return None
+
+        doctor = {**name_data}
+        doctor["facharzttitel"] = "Plastische und Ästhetische Chirurgie"
+
+        # Address
+        plz = (entry.get("zip") or "").strip()
+        if plz and re.match(r"\d{5}$", plz):
+            doctor["plz"] = plz
+        stadt = (entry.get("city") or "").strip()
+        if stadt:
+            doctor["stadt"] = stadt
+        strasse = (entry.get("address") or "").strip()
+        if strasse:
+            doctor["strasse"] = strasse
+
+        # Contact
+        phone = (entry.get("phone") or "").strip()
+        if phone:
+            doctor["telefon"] = phone
+        fax = (entry.get("fax") or "").strip()
+        if fax:
+            doctor["fax"] = fax
+        email = (entry.get("email") or "").strip()
+        if email:
+            doctor["email"] = email
+        url = (entry.get("url") or "").strip()
+        if url:
+            if not url.startswith("http"):
+                url = f"https://{url}"
+            doctor["website_url"] = url
+
+        # Specialty from drspec field
+        drspec = (entry.get("drspec") or "").strip()
+        if drspec:
+            doctor["facharzttitel"] = drspec
+
+        # Schwerpunkte from description or klinik
+        klinik = (entry.get("klinik") or "").strip()
+        if klinik:
+            doctor["schwerpunkte"] = klinik
+
+        # Coordinates
+        lat = entry.get("lat")
+        lng = entry.get("lng")
+        if lat and lng:
+            try:
+                doctor["latitude"] = float(lat)
+                doctor["longitude"] = float(lng)
+            except (ValueError, TypeError):
+                pass
+
+        # Skip non-German entries
+        country = (entry.get("country") or "").strip().lower()
+        if country and country not in ("deutschland", "germany", "de", ""):
+            return None
         if not doctor.get("plz") or not re.match(r"\d{5}$", doctor.get("plz", "")):
             return None
 

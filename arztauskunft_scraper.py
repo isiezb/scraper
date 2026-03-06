@@ -112,7 +112,7 @@ class ArztAuskunftScraper(BaseScraper):
                     doctor = self._parse_card(card)
                     if doctor:
                         doctor["land"] = "DE"
-                        self.upsert_doctor(doctor)
+                        self.upsert_arzt(doctor)
                         count += 1
                 except Exception as e:
                     self.logger.error(f"  Failed parsing card: {e}")

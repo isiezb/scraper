@@ -551,7 +551,7 @@ class AerztekammerScraper(BaseScraper):
                         if doctor:
                             doctor["bundesland"] = "Brandenburg"
                             doctor["land"] = "DE"
-                            self.upsert_doctor(doctor)
+                            self.upsert_arzt(doctor)
                             count += 1
                     except Exception as e:
                         self.logger.error(f"  Failed parsing Brandenburg entry: {e}")
@@ -671,7 +671,7 @@ class AerztekammerScraper(BaseScraper):
                         if doctor:
                             doctor["bundesland"] = "Berlin"
                             doctor["land"] = "DE"
-                            self.upsert_doctor(doctor)
+                            self.upsert_arzt(doctor)
                             count += 1
                     except Exception as e:
                         self.logger.error(f"  Failed Berlin detail {doc_id}: {e}")

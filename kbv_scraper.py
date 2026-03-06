@@ -259,11 +259,10 @@ class KBVScraper(BaseScraper):
         if strasse and hausnummer:
             strasse = f"{strasse} {hausnummer}"
 
-        # Extract Fachgebiet from ag (Arztgruppen) list
-        facharzttitel = search_def["label"]
-        ag_list = data.get("ag", [])
-        if isinstance(ag_list, list) and ag_list:
-            facharzttitel = ag_list[0].get("value", facharzttitel)
+        # Use the search filter label as facharzttitel — the ag (Arztgruppen)
+        # list contains the broad category (e.g. "Chirurgie und Orthopädie")
+        # which is too generic for our directory.
+        facharzttitel = "Plastische und Ästhetische Chirurgie"
 
         arzt_data = {
             "vorname": vorname,

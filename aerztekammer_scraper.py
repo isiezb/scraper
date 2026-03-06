@@ -64,7 +64,7 @@ class AerztekammerScraper(BaseScraper):
         super().close()
 
     # Kammern that use direct JSON APIs (no HTML parsing needed)
-    API_KAMMERN = {"AEKNO", "AEKHESSEN"}
+    API_KAMMERN = {"AEKNO", "AEKHESSEN", "AEKHH", "AEKSL"}
     # Kammern with custom scrapers
     CUSTOM_KAMMERN = {"AEKBW"}
     # Kammern known to have NO public Arztsuche (skip silently)
@@ -133,6 +133,10 @@ class AerztekammerScraper(BaseScraper):
             self._scrape_kvno(kammer)
         elif kammer["kuerzel"] == "AEKHESSEN":
             self._scrape_hessen(kammer)
+        elif kammer["kuerzel"] == "AEKHH":
+            self._scrape_hamburg(kammer)
+        elif kammer["kuerzel"] == "AEKSL":
+            self._scrape_saarland(kammer)
 
     def _scrape_kvno(self, kammer: dict):
         """Scrape Nordrhein via KVNO JSON API (arztsuche.kvno.de)."""
@@ -310,21 +314,213 @@ class AerztekammerScraper(BaseScraper):
 
         return doctor
 
+    # ── Hamburg (aerztekammer-hamburg.org — JSON API) ───────────────
+
+    def _scrape_hamburg(self, kammer: dict):
+        """Scrape Hamburg via aerztekammer-hamburg.org JSON API.
+
+        Single GET returns ALL ~3,700 doctors as JSON. We filter for
+        plastic surgery branches locally.
+        """
+        import requests
+
+        api_url = "https://aerztekammer-hamburg.org/search_api/arztsuche.php"
+        try:
+            resp = requests.get(api_url, timeout=60)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            self.logger.error(f"  Hamburg API failed: {e}")
+            return
+
+        results = data.get("results", [])
+        self.logger.info(f"  Hamburg API returned {len(results)} total doctors")
+
+        count = 0
+        for entry in results:
+            try:
+                doctor = self._parse_hamburg_entry(entry)
+                if doctor:
+                    self._process_doctor(doctor, kammer)
+                    count += 1
+            except Exception as e:
+                self.logger.error(f"  Failed parsing Hamburg entry: {e}")
+
+        self.logger.info(f"  Hamburg: processed {count} plastic surgeons")
+
+    def _parse_hamburg_entry(self, entry: dict) -> dict | None:
+        """Parse a Hamburg API entry. Returns None if not a plastic surgeon."""
+        branches = entry.get("branch", [])
+        branch_str = " ".join(branches).lower()
+        if not any(kw in branch_str for kw in ("plastisch", "ästhetisch", "aesthetisch")):
+            return None
+
+        vorname = (entry.get("first_name") or "").strip()
+        nachname = (entry.get("last_name") or "").strip()
+        if not vorname or not nachname:
+            return None
+
+        titel = (entry.get("degree") or "").strip()
+
+        doctor = {
+            "vorname": vorname,
+            "nachname": nachname,
+            "titel": titel,
+            "facharzttitel": ", ".join(branches),
+            "plz": str(entry.get("zip", "")).strip() or None,
+            "stadt": "Hamburg",
+            "strasse": (entry.get("street") or "").strip() or None,
+        }
+
+        # Contact info
+        phone = (entry.get("phone") or "").strip()
+        if phone:
+            doctor["telefon"] = phone
+        fax = (entry.get("fax") or "").strip()
+        if fax:
+            doctor["fax"] = fax
+        email = (entry.get("email") or "").strip()
+        if email:
+            doctor["email"] = email
+        web = (entry.get("web") or "").strip()
+        if web:
+            if not web.startswith("http"):
+                web = f"https://{web}"
+            doctor["website_url"] = web
+
+        # Focus areas
+        focus = entry.get("focus", [])
+        if focus:
+            doctor["schwerpunkte"] = ", ".join(focus)
+
+        return doctor
+
+    # ── Saarland (aerztekammer-saarland.de — AJAX HTML) ───────────
+
+    def _scrape_saarland(self, kammer: dict):
+        """Scrape Saarland via aerztekammer-saarland.de AJAX endpoint.
+
+        GET request returns HTML fragments with doctor entries.
+        """
+        import requests
+
+        url = "https://www.aerztekammer-saarland.de/aerzte/informationenfueraerzte/arztsuche/results.inc"
+        params = {"f": "Plastische und Ästhetische Chirurgie"}
+        try:
+            resp = requests.get(url, params=params, timeout=30)
+            resp.raise_for_status()
+            html = resp.text
+        except Exception as e:
+            self.logger.error(f"  Saarland API failed: {e}")
+            return
+
+        soup = BeautifulSoup(html, "html.parser")
+        entries = soup.select("article.entry.leftpad.single")
+
+        self.logger.info(f"  Saarland returned {len(entries)} entries")
+
+        count = 0
+        for entry in entries:
+            try:
+                doctor = self._parse_saarland_entry(entry)
+                if doctor:
+                    self._process_doctor(doctor, kammer)
+                    count += 1
+            except Exception as e:
+                self.logger.error(f"  Failed parsing Saarland entry: {e}")
+
+        self.logger.info(f"  Saarland: processed {count} plastic surgeons")
+
+    def _parse_saarland_entry(self, entry) -> dict | None:
+        """Parse a Saarland HTML entry (article.entry.leftpad.single)."""
+        # Name from h2.entry-title
+        name_el = entry.select_one("h2.entry-title")
+        if not name_el:
+            return None
+
+        name_text = name_el.get_text(strip=True)
+        if not name_text or len(name_text) < 4:
+            return None
+
+        name_data = self._extract_name_from_text(name_text)
+        if not name_data:
+            return None
+
+        doctor = {**name_data, "facharzttitel": "Plastische und Ästhetische Chirurgie"}
+
+        # Address from first col-md-6
+        addr_col = entry.select_one(".col-md-6")
+        if addr_col:
+            addr_text = addr_col.decode_contents()
+            addr_lines = [l.strip() for l in re.split(r"<br\s*/?>", addr_text) if l.strip()]
+            for line in addr_lines:
+                # Skip bold lines (practice name)
+                if "<b>" in line:
+                    continue
+                clean = BeautifulSoup(line, "html.parser").get_text(strip=True)
+                plz_match = re.match(r"(\d{5})\s+(.+)", clean)
+                if plz_match:
+                    doctor["plz"] = plz_match.group(1)
+                    doctor["stadt"] = plz_match.group(2).strip()
+                elif clean and len(clean) > 3 and not doctor.get("strasse"):
+                    doctor["strasse"] = clean
+
+        # Contact from second col-md-6
+        contact_col = entry.select(".col-md-6")
+        if len(contact_col) > 1:
+            contact_text = contact_col[1].decode_contents()
+            contact_lines = [l.strip() for l in re.split(r"<br\s*/?>", contact_text) if l.strip()]
+            for line in contact_lines:
+                clean = BeautifulSoup(line, "html.parser").get_text(strip=True)
+                if clean.startswith("Telefon:"):
+                    doctor["telefon"] = clean.replace("Telefon:", "").strip()
+                elif clean.startswith("Fax:"):
+                    doctor["fax"] = clean.replace("Fax:", "").strip()
+
+            # Email from mailto link
+            email_link = contact_col[1].select_one("a[href^='mailto:']")
+            if email_link:
+                doctor["email"] = email_link.get_text(strip=True)
+
+            # Website from non-mailto link
+            for a in contact_col[1].select("a[href]"):
+                href = a.get("href", "")
+                if href and not href.startswith("mailto:"):
+                    if not href.startswith("http"):
+                        href = f"https://{href}"
+                    doctor["website_url"] = href
+                    break
+
+        # Schwerpunkte from entry-cats
+        cats = entry.select_one("span.entry-cats")
+        if cats:
+            schwerpunkte_spans = cats.select("span.abovefooter")
+            extras = []
+            for sp in schwerpunkte_spans:
+                text = sp.get_text(strip=True)
+                if "Plastische" not in text and text:
+                    extras.append(text)
+            if extras:
+                doctor["schwerpunkte"] = ", ".join(extras)
+
+        return doctor
+
     # ── BW (arztsuche-bw.de — static HTML GET) ──────────────────────
 
     def _scrape_bw(self, kammer: dict):
         """Scrape Baden-Württemberg via arztsuche-bw.de — paginated GET form.
 
-        Searches 'Chirurgie' category (420) — BW has no separate Plastische category.
-        Paginates through ALL results (offset-based) and filters by Plastische in qualifications.
-        Uses longer delays, retry logic, and resume support.
+        Uses id_fachgruppe=425 (Plastische und Ästhetische Chirurgie) — ~51 results
+        in only 3 pages, much faster than the old approach of paging through all
+        1821 Chirurgie (420) results.
         """
         base_url = "https://www.arztsuche-bw.de/index.php"
-        MAX_BW_PAGES = 100  # 1821 results / 20 per page = 92 pages
+        MAX_BW_PAGES = 10  # Safety limit (51 results / 20 per page = 3 pages)
         consecutive_failures = 0
 
         # Resume from last successful offset
-        saved_offset, completed = self.get_progress("bw")
+        # Use new progress key since we switched from fachgruppe 420 to 425
+        saved_offset, completed = self.get_progress("bw_425")
         if completed:
             self.logger.info("  BW: already completed, skipping")
             return
@@ -335,8 +531,8 @@ class AerztekammerScraper(BaseScraper):
         while offset < MAX_BW_PAGES * 20:
             params = {
                 "suchen": "1",
-                "arztgruppe": "alle",
-                "id_fachgruppe": "420",  # Chirurgie (no Plastische sub-category)
+                "arztgruppe": "facharzt",
+                "id_fachgruppe": "425",  # Plastische und Ästhetische Chirurgie
                 "offset": offset,
             }
 
@@ -366,7 +562,7 @@ class AerztekammerScraper(BaseScraper):
 
             # Save progress after each successful page
             offset += 20
-            self.save_progress("bw", offset)
+            self.save_progress("bw_425", offset)
 
             if len(rows) < 20:
                 break
@@ -374,7 +570,7 @@ class AerztekammerScraper(BaseScraper):
             time.sleep(8 + random.random() * 4)
 
         # Mark BW as completed
-        self.save_progress("bw", offset, completed=True)
+        self.save_progress("bw_425", offset, completed=True)
         self.logger.info(f"  BW: completed (final offset {offset})")
         return True
 
@@ -573,17 +769,17 @@ class AerztekammerScraper(BaseScraper):
             self.logger.error(f"  Page load failed: {e}")
             return
 
-        # Kammer-specific JS scrapers
+        # Kammer-specific JS scrapers (legacy — AEKHH and AEKSL now use API)
         if kammer["kuerzel"] == "AEKHH":
-            self._scrape_hamburg(kammer)
+            self._scrape_hamburg_js(kammer)
         elif kammer["kuerzel"] == "AEKSL":
-            self._scrape_saarland(kammer)
+            self._scrape_saarland_js(kammer)
         else:
             # Generic JS scraping
             self._scrape_js_generic(kammer)
 
-    def _scrape_hamburg(self, kammer: dict):
-        """Scrape Hamburg Aerztekammer — search each relevant Fachgebiet dropdown value."""
+    def _scrape_hamburg_js(self, kammer: dict):
+        """Scrape Hamburg Aerztekammer via Playwright (legacy — now using API)."""
         # Find all dropdown options matching plastic/aesthetic surgery
         plastisch_options = self._page.evaluate("""() => {
             const sel = document.querySelector("select[name='l-area'], #l-area");
@@ -726,10 +922,10 @@ class AerztekammerScraper(BaseScraper):
 
         return doctor
 
-    # ── Saarland ────────────────────────────────────────────────────
+    # ── Saarland (legacy JS) ────────────────────────────────────────
 
-    def _scrape_saarland(self, kammer: dict):
-        """Scrape Saarland Aerztekammer — POST form with select[name='s']."""
+    def _scrape_saarland_js(self, kammer: dict):
+        """Scrape Saarland Aerztekammer via Playwright (legacy — now using API)."""
         # Select "Plastische und Ästhetische Chirurgie" from Fachgebiet dropdown
         try:
             self._page.select_option("select[name='s']", label="Plastische und Ästhetische Chirurgie")

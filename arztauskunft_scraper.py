@@ -199,14 +199,17 @@ class ArztAuskunftScraper(BaseScraper):
 
     # Keywords that indicate an institution, not a person
     INSTITUTION_KEYWORDS = {
-        "klinik", "kliniken", "krankenhaus", "hospital", "clinic", "praxis",
-        "zentrum", "center", "centrum", "institut", "universit", "berufsgen",
-        "gemeinschaftspraxis", "mvz", "gmbh", "ggmbh", "gbr", "e.v.", "co. kg",
-        "stiftung", "akademie", "ambulanz", "abteilung", "bergmannsheil",
-        "charite", "charité", "asklepios", "helios", "vivantes", "agaplesion",
-        "ameos", "atos", "sana ", "diakonie", "diakovere", "caritas",
-        "evangelisch", "evang.", "ev. ", "kathol", "residenz", "campus",
-        "gesundheit nord", "fachärzte", "bundeswehr", " se ",
+        "klinik", "kliniken", "krankenhaus", "hospital", "clinic", "clinicum",
+        "praxis", "zentrum", "center", "centrum", "institut", "universit",
+        "berufsgen", "gemeinschaftspraxis", "mvz", "gmbh", "ggmbh", "gbr",
+        "e.v.", "co. kg", "stiftung", "akademie", "ambulanz", "abteilung",
+        "bergmannsheil", "charite", "charité", "asklepios", "helios",
+        "vivantes", "agaplesion", "ameos", "atos", "sana ", "diakonie",
+        "diakovere", "caritas", "evangelisch", "evang.", "ev. ", "kathol",
+        "residenz", "campus", "gesundheit nord", "fachärzte", "bundeswehr",
+        " se ", "ästhetik", "aesthetik", "aesthetic", "surgery", "chirurgia",
+        "esthetica", "ethianum", "medcenter", "lubinus", "dorow", "beauty",
+        "lacomed", "lipoedem",
     }
 
     def _is_institution(self, text: str) -> bool:
@@ -253,14 +256,16 @@ class ArztAuskunftScraper(BaseScraper):
         """Fallback: extract name from URL slug like 'dr-med-firstname-lastname'."""
         # Reject institution slugs
         if any(kw in slug.lower() for kw in (
-                "klinik", "kliniken", "krankenhaus", "hospital", "clinic", "praxis",
-                "zentrum", "center", "centrum", "institut", "universit", "berufsgen",
-                "gemeinschaftspraxis", "mvz", "gmbh", "ggmbh", "gbr",
+                "klinik", "kliniken", "krankenhaus", "hospital", "clinic", "clinicum",
+                "praxis", "zentrum", "center", "centrum", "institut", "universit",
+                "berufsgen", "gemeinschaftspraxis", "mvz", "gmbh", "ggmbh", "gbr",
                 "stiftung", "akademie", "ambulanz", "abteilung", "bergmannsheil",
                 "charite", "asklepios", "helios", "vivantes", "agaplesion",
                 "ameos", "atos", "sana-", "diakonie", "diakovere", "caritas",
-                "evangelisch", "kathol", "residenz", "campus",
-                "bundeswehr", "fachärzte", "facharzte")):
+                "evangelisch", "kathol", "residenz", "campus", "bundeswehr",
+                "facharzte", "aesthetik", "aesthetic", "surgery", "chirurgia",
+                "esthetica", "ethianum", "medcenter", "lubinus", "dorow",
+                "beauty", "lacomed", "lipoedem")):
             return None
         parts = slug.split("-")
         title_words = {"dr", "med", "prof", "priv", "doz", "dent", "habil", "dipl", "univ"}

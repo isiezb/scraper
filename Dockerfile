@@ -3,7 +3,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Cache-bust: v12 — changing this invalidates ALL layers below
-ARG CACHEBUST=v33
+ARG CACHEBUST=v34
 
 # System deps for lxml + Playwright Chromium
 RUN apt-get update && apt-get install -y --no-install-recommends \

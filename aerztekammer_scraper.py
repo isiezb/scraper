@@ -367,8 +367,8 @@ class AerztekammerScraper(BaseScraper):
 
             if len(rows) < 20:
                 break
-            # Longer delay for BW to avoid rate limiting (3-5s between pages)
-            time.sleep(3 + random.random() * 2)
+            # Longer delay for BW to avoid rate limiting (8-12s between pages)
+            time.sleep(8 + random.random() * 4)
 
         # Mark BW as completed
         self.save_progress("bw", offset, completed=True)

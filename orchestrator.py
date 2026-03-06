@@ -27,6 +27,7 @@ from kbv_scraper import KBVScraper
 from oegk_scraper import OEGKScraper
 from dgpraec_scraper import DGPRAECScraper
 from arztauskunft_scraper import ArztAuskunftScraper
+from profile_enrichment_scraper import ProfileEnrichmentScraper
 print("All scraper modules imported OK", flush=True)
 
 logging.basicConfig(
@@ -47,7 +48,8 @@ PARALLEL_SCRAPERS = [
 
 # Phase 2: enrichment only, must run after Phase 1
 ENRICHMENT_SCRAPERS = [
-    DGPRAECScraper,       # DACH: society membership enrichment
+    DGPRAECScraper,              # DACH: society membership enrichment
+    ProfileEnrichmentScraper,    # DE: detail page data (phone, website, GKV, etc.)
 ]
 
 

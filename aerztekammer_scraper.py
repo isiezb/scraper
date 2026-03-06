@@ -341,8 +341,8 @@ class AerztekammerScraper(BaseScraper):
             if not resp:
                 consecutive_failures += 1
                 if consecutive_failures >= 3:
-                    self.logger.warning(f"  BW: 3 consecutive failures at offset {offset}, stopping")
-                    break
+                    self.logger.warning(f"  BW: 3 consecutive failures at offset {offset}, stopping (will retry next run)")
+                    return  # Don't mark as completed
                 # Wait longer before retry
                 self.logger.info(f"  BW: retry after failure (attempt {consecutive_failures}/3), waiting 10s...")
                 time.sleep(10)

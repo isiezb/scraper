@@ -27,6 +27,7 @@ from kbv_scraper import KBVScraper
 from oegk_scraper import OEGKScraper
 from dgpraec_scraper import DGPRAECScraper
 from arztauskunft_scraper import ArztAuskunftScraper
+from vdaepc_scraper import VDAEPCScraper
 from profile_enrichment_scraper import ProfileEnrichmentScraper
 print("All scraper modules imported OK", flush=True)
 
@@ -43,6 +44,7 @@ PARALLEL_SCRAPERS = [
     AerztekammerScraper,  # DE: all 17 Landesärztekammern + DGPRÄC nationwide
     KBVScraper,           # DE: 116117.de — nationwide GKV-zugelassene Ärzte
     ArztAuskunftScraper,  # DE: Stiftung Gesundheit — comprehensive (ALL doctors)
+    VDAEPCScraper,        # DE: VDÄPC member directory — verified plastic surgeons
     # OEGKScraper,          # AT: disabled — returns 0 results, Playwright too slow
 ]
 

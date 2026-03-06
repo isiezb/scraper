@@ -202,7 +202,34 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_aerzte_collision_group ON aerzte(collision_group);
         CREATE INDEX IF NOT EXISTS idx_spez_arzt ON spezialisierungen(arzt_id);
         CREATE INDEX IF NOT EXISTS idx_spez_eingriff ON spezialisierungen(eingriff);
+
+        CREATE TABLE IF NOT EXISTS scraper_progress (
+            id SERIAL PRIMARY KEY,
+            scraper TEXT NOT NULL,
+            source_key TEXT NOT NULL,
+            last_offset INTEGER DEFAULT 0,
+            completed BOOLEAN DEFAULT FALSE,
+            updated_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(scraper, source_key)
+        );
     """)
+
+    # Ensure scraper_progress table exists (separate statement for robustness)
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS scraper_progress (
+                id SERIAL PRIMARY KEY,
+                scraper TEXT NOT NULL,
+                source_key TEXT NOT NULL,
+                last_offset INTEGER DEFAULT 0,
+                completed BOOLEAN DEFAULT FALSE,
+                updated_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(scraper, source_key)
+            )
+        """)
+        conn.commit()
+    except Exception:
+        conn.rollback()
 
     # Migration for existing databases: add new columns if missing
     migration_cols = [

@@ -7,12 +7,14 @@ Extracts all available fields: name, Facharzttitel, address, phone, email, websi
 All entries are verified: true, source: 'aerztekammer_de'.
 """
 
+import random
 import re
+import time
 from datetime import datetime, timezone
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
-from base_scraper import BaseScraper, generate_slug
+from base_scraper import BaseScraper
 from kammer_config import KAMMERN
 
 
@@ -83,19 +85,29 @@ class AerztekammerScraper(BaseScraper):
 
     def run(self):
         for kammer in KAMMERN:
-            if kammer["kuerzel"] in self.SKIP_KAMMERN:
+            kuerzel = kammer["kuerzel"]
+            if kuerzel in self.SKIP_KAMMERN:
                 self.logger.info(f"Skipping: {kammer['name']} (no public Arztsuche)")
                 continue
-            self.logger.info(f"Scraping: {kammer['name']} ({kammer['kuerzel']})")
+
+            # Check if this Kammer was already completed
+            _, completed = self.get_progress(f"kammer_{kuerzel}")
+            if completed:
+                self.logger.info(f"Skipping: {kammer['name']} (already completed)")
+                continue
+
+            self.logger.info(f"Scraping: {kammer['name']} ({kuerzel})")
             try:
-                if kammer["kuerzel"] in self.API_KAMMERN:
+                if kuerzel in self.API_KAMMERN:
                     self._scrape_kammer_api(kammer)
-                elif kammer["kuerzel"] in self.CUSTOM_KAMMERN:
+                elif kuerzel in self.CUSTOM_KAMMERN:
                     self._scrape_custom(kammer)
                 elif kammer.get("needs_js"):
                     self._scrape_kammer_js(kammer)
                 else:
                     self._scrape_kammer(kammer)
+                # Mark this Kammer as completed
+                self.save_progress(f"kammer_{kuerzel}", 0, completed=True)
             except Exception as e:
                 self.logger.error(f"Failed {kammer['name']}: {e}")
             self.wait()
@@ -300,41 +312,67 @@ class AerztekammerScraper(BaseScraper):
     def _scrape_bw(self, kammer: dict):
         """Scrape Baden-Württemberg via arztsuche-bw.de — paginated GET form.
 
-        Searches 'Chirurgie' category (420) and filters by Plastische in results.
+        Searches 'Chirurgie' category (420) — BW has no separate Plastische category.
+        Paginates through ALL results (offset-based) and filters by Plastische in qualifications.
+        Uses longer delays, retry logic, and resume support.
         """
         base_url = "https://www.arztsuche-bw.de/index.php"
-        page_num = 0
+        MAX_BW_PAGES = 100  # 1821 results / 20 per page = 92 pages
+        consecutive_failures = 0
 
-        while page_num < self.MAX_PAGES:
+        # Resume from last successful offset
+        saved_offset, completed = self.get_progress("bw")
+        if completed:
+            self.logger.info("  BW: already completed, skipping")
+            return
+        offset = saved_offset
+        if offset > 0:
+            self.logger.info(f"  BW: resuming from offset {offset} (page {offset // 20 + 1})")
+
+        while offset < MAX_BW_PAGES * 20:
             params = {
                 "suchen": "1",
                 "arztgruppe": "alle",
-                "id_fachgruppe": "420",  # Chirurgie
-                "nachname": "",
-                "plz": "",
-                "ort": "",
-                "landkreis": "",
-                "start": page_num * 20,
+                "id_fachgruppe": "420",  # Chirurgie (no Plastische sub-category)
+                "offset": offset,
             }
 
             resp = self.fetch(base_url, params=params)
             if not resp:
-                break
+                consecutive_failures += 1
+                if consecutive_failures >= 3:
+                    self.logger.warning(f"  BW: 3 consecutive failures at offset {offset}, stopping")
+                    break
+                # Wait longer before retry
+                self.logger.info(f"  BW: retry after failure (attempt {consecutive_failures}/3), waiting 10s...")
+                time.sleep(10)
+                continue
 
+            consecutive_failures = 0
             soup = BeautifulSoup(resp.text, "lxml")
             rows = soup.select("li.resultrow")
             if not rows:
                 break
+
+            self.logger.info(f"  BW page {offset // 20 + 1}: {len(rows)} rows")
 
             for row in rows:
                 doctor = self._parse_bw_row(row)
                 if doctor:
                     self._process_doctor(doctor, kammer)
 
-            page_num += 1
+            # Save progress after each successful page
+            offset += 20
+            self.save_progress("bw", offset)
+
             if len(rows) < 20:
                 break
-            self.wait()
+            # Longer delay for BW to avoid rate limiting (3-5s between pages)
+            time.sleep(3 + random.random() * 2)
+
+        # Mark BW as completed
+        self.save_progress("bw", offset, completed=True)
+        self.logger.info(f"  BW: completed (final offset {offset})")
 
     def _parse_bw_row(self, row) -> dict | None:
         """Parse a BW arztsuche result row."""
@@ -430,12 +468,13 @@ class AerztekammerScraper(BaseScraper):
     }
 
     def _scrape_dgpraec(self):
-        """Scrape DGPRÄC Arztsuche — 400+ plastic surgeons across all of Germany.
-
-        This replaces 116117.de as the nationwide source for states without
-        their own Arztsuche portal.
-        """
+        """Scrape DGPRÄC Arztsuche — 400+ plastic surgeons across all of Germany."""
         import requests as _requests
+
+        _, completed = self.get_progress("dgpraec")
+        if completed:
+            self.logger.info("DGPRÄC: already completed, skipping")
+            return
 
         self.logger.info("Scraping DGPRÄC Arztsuche (nationwide)...")
 
@@ -472,6 +511,7 @@ class AerztekammerScraper(BaseScraper):
             except Exception as e:
                 self.logger.error(f"  Failed parsing DGPRÄC row: {e}")
 
+        self.save_progress("dgpraec", count, completed=True)
         self.logger.info(f"  DGPRÄC: processed {count} doctors")
 
     def _parse_dgpraec_row(self, row) -> dict | None:
@@ -998,11 +1038,28 @@ class AerztekammerScraper(BaseScraper):
             "titel": " ".join(titel_parts).strip().rstrip(",. "),
         }
 
+    # University names that appear after "Univ." and should be part of the title
+    UNIVERSITY_NAMES = {
+        "semmelweis", "budapest", "wien", "graz", "innsbruck", "zürich", "zurich",
+        "basel", "bern", "heidelberg", "münchen", "berlin", "hamburg", "köln",
+        "freiburg", "tübingen", "göttingen", "erlangen", "würzburg", "mainz",
+        "bonn", "marburg", "giessen", "rostock", "jena", "leipzig", "dresden",
+        "pécs", "szeged", "debrecen", "bratislava", "prag", "praha", "brno",
+    }
+
     def _extract_name_from_text(self, text: str) -> dict | None:
         """Extract name components from text."""
         text = text.strip()
         if len(text) < 4:
             return None
+
+        # Normalize compound title tokens: "Dr.med." -> "Dr. med."
+        text = re.sub(r"(?i)\bDr\.med\.", "Dr. med.", text)
+        text = re.sub(r"(?i)\bDr\.dent\.", "Dr. dent.", text)
+        text = re.sub(r"(?i)\bUniv\.-Prof\.", "Univ.-Prof.", text)
+        # Strip stray parentheses and their content before name (e.g. "Semmelweis)")
+        text = re.sub(r"[()]+", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
 
         first_words = {w.lower().rstrip(".,:/") for w in text.split()[:4]}
         if first_words & self.SKIP_WORDS:
@@ -1010,8 +1067,10 @@ class AerztekammerScraper(BaseScraper):
 
         titel_kw = {
             "prof", "prof.", "dr", "dr.", "med", "med.", "pd",
-            "priv.-doz", "priv.-doz.", "univ", "univ.", "dent", "dent.",
-            "habil", "habil.",
+            "priv.-doz", "priv.-doz.", "priv", "priv.",
+            "univ.-prof", "univ.-prof.", "univ", "univ.",
+            "doz", "doz.", "dent", "dent.",
+            "habil", "habil.", "dipl.-med", "dipl.-med.",
         }
 
         # "Nachname, Vorname, Titel" pattern
@@ -1034,14 +1093,22 @@ class AerztekammerScraper(BaseScraper):
 
         words = text.split()
         in_name = False
+        last_was_univ = False  # Track if previous word was "Univ." to catch university names
         for word in words:
             clean = word.lower().rstrip(".,")
             if not in_name and clean in titel_kw:
                 titel_parts.append(word)
+                last_was_univ = clean in ("univ", "univ.")
+            elif not in_name and last_was_univ and clean in self.UNIVERSITY_NAMES:
+                # University name after "Univ." — treat as part of title
+                titel_parts.append(word)
+                last_was_univ = False
             elif not in_name and word == ",":
+                last_was_univ = False
                 continue
             else:
                 in_name = True
+                last_was_univ = False
                 if any(c.isdigit() for c in word) or word in (",", "|", "-", "\u2013", "\u2022", "/"):
                     break
                 if len(word) > 1 and word[0].isupper():
@@ -1052,9 +1119,15 @@ class AerztekammerScraper(BaseScraper):
         if len(name_parts) < 2:
             return None
 
+        # Reject if name parts are too short (likely parsing artifacts)
+        vorname = name_parts[0]
+        nachname = " ".join(name_parts[1:])
+        if len(vorname) < 2 or len(nachname) < 2:
+            return None
+
         return {
-            "vorname": name_parts[0],
-            "nachname": " ".join(name_parts[1:]),
+            "vorname": vorname,
+            "nachname": nachname,
             "titel": " ".join(titel_parts),
         }
 
@@ -1112,10 +1185,11 @@ class AerztekammerScraper(BaseScraper):
             self.logger.debug(f"  Skipped (no relevant Facharzttitel): {doctor['vorname']} {doctor['nachname']}")
             return
 
-        slug = generate_slug(doctor.get("titel", ""), doctor["vorname"], doctor["nachname"])
-        if slug in self.seen_slugs:
+        # Dedup by name only (ignore title differences between sources)
+        dedup_key = f"{doctor['vorname'].lower().strip()}|{doctor['nachname'].lower().strip()}"
+        if dedup_key in self.seen_slugs:
             return
-        self.seen_slugs.add(slug)
+        self.seen_slugs.add(dedup_key)
 
         arzt_data = {
             "vorname": doctor["vorname"],

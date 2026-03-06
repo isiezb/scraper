@@ -112,6 +112,11 @@ class OEGKScraper(BaseScraper):
         super().close()
 
     def run(self):
+        _, completed = self.get_progress("oegk_full")
+        if completed:
+            self.logger.info("OEGK: already completed, skipping")
+            return
+
         self._init_browser()
 
         if not self._browser:
@@ -146,6 +151,7 @@ class OEGKScraper(BaseScraper):
         self.logger.info("Phase 3: Cross-referencing and upserting...")
         self._cross_reference_and_upsert()
 
+        self.save_progress("oegk_full", 0, completed=True)
         self.finalize()
 
     def _scrape_oegk(self, sonderfach: str, city: dict):

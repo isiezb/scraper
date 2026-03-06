@@ -123,21 +123,30 @@ class DGPRAECScraper(BaseScraper):
             except Exception as e:
                 self.logger.error(f"  Failed parsing {url}: {e}")
 
+    # Domains to never follow — social media, search engines, etc.
+    BLOCKED_DOMAINS = {
+        "facebook.com", "instagram.com", "twitter.com", "x.com",
+        "youtube.com", "tiktok.com", "linkedin.com", "pinterest.com",
+        "google.com", "bing.com", "wikipedia.org", "amazon.com",
+    }
+
     def _find_profile_links(self, soup: BeautifulSoup, base_url: str) -> list[str]:
         """Find links to individual member profile pages."""
         links = set()
         for a in soup.find_all("a", href=True):
             href = a["href"]
+            full_url = urljoin(base_url, href)
+            if full_url == base_url or not full_url.startswith("http"):
+                continue
+            # Skip social media and other irrelevant domains
+            if any(domain in full_url.lower() for domain in self.BLOCKED_DOMAINS):
+                continue
             text = a.get_text(strip=True).lower()
             # Heuristic: profile-like URLs
             if any(kw in href.lower() for kw in ["profil", "member", "mitglied", "arzt", "surgeon", "dr-", "dr."]):
-                full_url = urljoin(base_url, href)
-                if full_url != base_url and full_url.startswith("http"):
-                    links.add(full_url)
+                links.add(full_url)
             elif any(kw in text for kw in ["dr.", "prof.", "dr ", "prof "]):
-                full_url = urljoin(base_url, href)
-                if full_url != base_url and full_url.startswith("http"):
-                    links.add(full_url)
+                links.add(full_url)
         return list(links)
 
     def _parse_member_list(self, soup: BeautifulSoup) -> list[dict]:

@@ -9,6 +9,21 @@ FACHGEBIET = "Plastische und Ästhetische Chirurgie"
 
 KAMMERN = [
     {
+        "name": "Baden-Württemberg",
+        "kuerzel": "AEKBW",
+        "bundesland": "Baden-Württemberg",
+        "base_url": "https://www.arztsuche-bw.de",
+        "search_url": "https://www.arztsuche-bw.de/index.php",
+        "method": "GET",
+        "params": {"suchen": "1", "arztgruppe": "alle", "id_fachgruppe": "420"},
+        "result_selector": "li.resultrow",
+        "name_selector": "dd.name dt",
+        "detail_selector": "dd.qualifikation",
+        "address_selector": "dd.adresse p.anschrift-arzt",
+        "pagination": "start",
+        "needs_js": False,
+    },
+    {
         "name": "Bayern",
         "kuerzel": "BLAEK",
         "bundesland": "Bayern",
@@ -36,21 +51,6 @@ KAMMERN = [
         "detail_selector": "N/A",
         "address_selector": "N/A",
         "pagination": None,
-        "needs_js": False,
-    },
-    {
-        "name": "Baden-Württemberg",
-        "kuerzel": "AEKBW",
-        "bundesland": "Baden-Württemberg",
-        "base_url": "https://www.arztsuche-bw.de",
-        "search_url": "https://www.arztsuche-bw.de/index.php",
-        "method": "GET",
-        "params": {"suchen": "1", "arztgruppe": "alle", "id_fachgruppe": "420"},
-        "result_selector": "li.resultrow",
-        "name_selector": "dd.name dt",
-        "detail_selector": "dd.qualifikation",
-        "address_selector": "dd.adresse p.anschrift-arzt",
-        "pagination": "start",
         "needs_js": False,
     },
     {

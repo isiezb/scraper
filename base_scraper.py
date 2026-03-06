@@ -141,6 +141,34 @@ class BaseScraper(ABC):
         self.conn.close()
         self.session.close()
 
+    # ── Progress tracking (resume support) ────────────────────────────
+
+    def get_progress(self, source_key: str) -> tuple[int, bool]:
+        """Get last offset and completed status for a source key.
+        Returns (last_offset, completed)."""
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT last_offset, completed FROM scraper_progress WHERE scraper = %s AND source_key = %s",
+            (self.name, source_key),
+        )
+        row = cur.fetchone()
+        cur.close()
+        if row:
+            return row[0], row[1] or False
+        return 0, False
+
+    def save_progress(self, source_key: str, offset: int, completed: bool = False):
+        """Save scraping progress for resume."""
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO scraper_progress (scraper, source_key, last_offset, completed, updated_at)
+            VALUES (%s, %s, %s, %s, NOW())
+            ON CONFLICT (scraper, source_key) DO UPDATE
+            SET last_offset = EXCLUDED.last_offset, completed = EXCLUDED.completed, updated_at = NOW()
+        """, (self.name, source_key, offset, completed))
+        self.conn.commit()
+        cur.close()
+
     def wait(self):
         delay = random.uniform(self.min_delay, self.max_delay)
         self.logger.debug(f"Waiting {delay:.1f}s...")
@@ -251,7 +279,12 @@ class BaseScraper(ABC):
                             cur.close()
                             return m[0], m[1] or False
 
-                # Name + PLZ but no disambiguator → COLLISION
+                # Exactly 1 name+PLZ match → safe to update (same person)
+                if len(plz_matches) == 1:
+                    cur.close()
+                    return plz_matches[0][0], plz_matches[0][1] or False
+
+                # Multiple name+PLZ matches → true COLLISION
                 cg = collision_group_hash(norm_name, candidate_plz)
                 self._flag_collision(cur, plz_matches, cg)
                 self.stats["kollisionen"] += 1
@@ -259,12 +292,16 @@ class BaseScraper(ABC):
                     f"Collision: {data.get('titel', '')} {data['vorname']} {data['nachname']} PLZ={candidate_plz} "
                     f"({len(plz_matches)} existing match(es))"
                 )
-                # Return None — caller will create a new separate record with collision flag
                 data["name_collision"] = True
                 data["collision_group"] = cg
                 data["collision_resolved"] = False
                 cur.close()
                 return None, None
+
+        # No PLZ on candidate — if exactly 1 name match exists, safe to update
+        if len(name_matches) == 1:
+            cur.close()
+            return name_matches[0][0], name_matches[0][1] or False
 
         cur.close()
         return None, None
@@ -422,7 +459,7 @@ class BaseScraper(ABC):
         cur = self.conn.cursor()
         for spec in specs:
             cur.execute(
-                "SELECT id FROM spezialisierungen WHERE arzt_id = %s AND eingriff = %s",
+                "SELECT id FROM spezialisierungen WHERE arzt_id = %s AND LOWER(eingriff) = LOWER(%s)",
                 (arzt_id, spec["eingriff"]),
             )
             if not cur.fetchone():

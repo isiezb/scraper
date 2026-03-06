@@ -24,11 +24,6 @@ SEARCH_FILTERS = [
         "kategorie": "koerper",
         "filters": [{"title": "Fachgebiet", "fieldName": "fgf", "selectedCodes": ["322"]}],
     },
-    {
-        "label": "Plastische und Ästhetische Operationen (ZBK)",
-        "kategorie": "koerper",
-        "filters": [{"title": "Zusatzqualifikation", "fieldName": "zbk", "selectedCodes": ["175"]}],
-    },
 ]
 
 # Search grid: German cities spaced ~100km apart for full coverage

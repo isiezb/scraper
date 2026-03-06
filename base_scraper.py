@@ -106,6 +106,8 @@ ALL_AERZTE_COLUMNS = [
 ]
 
 # Columns that can be updated on existing records
+# NOTE: source and source_type are intentionally excluded — they should only
+# be set on insert so the original source is preserved across scraper runs.
 UPDATABLE_COLUMNS = [
     "ist_facharzt", "facharzttitel", "selbstbezeichnung",
     "approbation_verifiziert", "kammer_id", "land", "stadt",
@@ -113,7 +115,7 @@ UPDATABLE_COLUMNS = [
     "website_url", "datenquelle",
     "gln_nummer", "zsr_nummer", "kammer_mitgliedsnr", "arztsuche_id",
     "gkv_zugelassen", "kassenstatus_at", "kammer_region",
-    "verified", "source", "source_type", "last_verified_at",
+    "verified", "last_verified_at",
     "geburtsjahr", "telefon", "email", "fax", "strasse", "schwerpunkte",
     "fmh_mitglied", "dgpraec_mitglied", "dgaepc_mitglied",
     "vdaepc_mitglied", "isaps_mitglied",

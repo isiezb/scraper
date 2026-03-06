@@ -72,8 +72,11 @@ SEARCH_LOCATIONS = [
     {"name": "Hamburg", "lat": 53.551, "lon": 9.994},
     {"name": "Rostock", "lat": 54.092, "lon": 12.099},
     {"name": "Schwerin", "lat": 53.636, "lon": 11.401},
+    {"name": "Neubrandenburg", "lat": 53.557, "lon": 13.261},
+    {"name": "Greifswald", "lat": 54.096, "lon": 13.382},
     {"name": "Bremen", "lat": 53.080, "lon": 8.801},
     {"name": "Oldenburg", "lat": 53.143, "lon": 8.214},
+    {"name": "Emden", "lat": 53.359, "lon": 7.206},
     # NRW — dense area, needs fine grid
     {"name": "Düsseldorf", "lat": 51.228, "lon": 6.774},
     {"name": "Köln", "lat": 50.938, "lon": 6.960},
@@ -110,6 +113,7 @@ SEARCH_LOCATIONS = [
     {"name": "Stuttgart", "lat": 48.776, "lon": 9.183},
     {"name": "Karlsruhe", "lat": 49.007, "lon": 8.404},
     {"name": "Freiburg", "lat": 47.999, "lon": 7.842},
+    {"name": "Offenburg", "lat": 48.473, "lon": 7.945},
     {"name": "Ulm", "lat": 48.402, "lon": 9.988},
     {"name": "Konstanz", "lat": 47.660, "lon": 9.175},
     {"name": "Heilbronn", "lat": 49.142, "lon": 9.220},
@@ -119,6 +123,7 @@ SEARCH_LOCATIONS = [
     {"name": "Nürnberg", "lat": 49.452, "lon": 11.077},
     {"name": "Augsburg", "lat": 48.366, "lon": 10.899},
     {"name": "Regensburg", "lat": 49.013, "lon": 12.102},
+    {"name": "Amberg", "lat": 49.444, "lon": 11.858},
     {"name": "Würzburg", "lat": 49.794, "lon": 9.929},
     {"name": "Ingolstadt", "lat": 48.764, "lon": 11.425},
     {"name": "Passau", "lat": 48.574, "lon": 13.451},
@@ -128,6 +133,7 @@ SEARCH_LOCATIONS = [
     {"name": "Berlin", "lat": 52.520, "lon": 13.405},
     {"name": "Potsdam", "lat": 52.391, "lon": 13.064},
     {"name": "Cottbus", "lat": 51.761, "lon": 14.335},
+    {"name": "Frankfurt_Oder", "lat": 52.347, "lon": 14.551},
     # Sachsen
     {"name": "Dresden", "lat": 51.051, "lon": 13.738},
     {"name": "Leipzig", "lat": 51.340, "lon": 12.375},
@@ -135,9 +141,18 @@ SEARCH_LOCATIONS = [
     # Sachsen-Anhalt
     {"name": "Magdeburg", "lat": 52.121, "lon": 11.628},
     {"name": "Halle", "lat": 51.482, "lon": 11.970},
+    {"name": "Stendal", "lat": 52.607, "lon": 11.859},
+    {"name": "Wittenberg", "lat": 51.866, "lon": 12.649},
     # Thüringen
     {"name": "Erfurt", "lat": 50.978, "lon": 11.029},
     {"name": "Jena", "lat": 50.928, "lon": 11.586},
+    {"name": "Nordhausen", "lat": 51.505, "lon": 10.791},
+    # Vogtland / Oberfranken gap
+    {"name": "Plauen", "lat": 50.496, "lon": 12.134},
+    {"name": "Coburg", "lat": 50.259, "lon": 10.963},
+    # Südbayern gap
+    {"name": "Garmisch", "lat": 47.500, "lon": 11.095},
+    {"name": "Straubing", "lat": 48.882, "lon": 12.574},
 ]
 
 

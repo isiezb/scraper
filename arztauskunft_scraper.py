@@ -199,10 +199,14 @@ class ArztAuskunftScraper(BaseScraper):
 
     # Keywords that indicate an institution, not a person
     INSTITUTION_KEYWORDS = {
-        "klinik", "kliniken", "krankenhaus", "hospital", "praxis", "zentrum",
-        "institut", "universitäts", "universität", "berufsgenossenschaft",
-        "gemeinschaftspraxis", "mvz", "gmbh", "ggmbh", "e.v.", "stiftung",
-        "akademie", "ambulanz", "abteilung", "bergmannsheil", "charite", "charité",
+        "klinik", "kliniken", "krankenhaus", "hospital", "clinic", "praxis",
+        "zentrum", "center", "centrum", "institut", "universit", "berufsgen",
+        "gemeinschaftspraxis", "mvz", "gmbh", "ggmbh", "gbr", "e.v.", "co. kg",
+        "stiftung", "akademie", "ambulanz", "abteilung", "bergmannsheil",
+        "charite", "charité", "asklepios", "helios", "vivantes", "agaplesion",
+        "ameos", "atos", "sana ", "diakonie", "diakovere", "caritas",
+        "evangelisch", "evang.", "ev. ", "kathol", "residenz", "campus",
+        "gesundheit nord", "fachärzte", "bundeswehr", " se ",
     }
 
     def _is_institution(self, text: str) -> bool:
@@ -248,8 +252,15 @@ class ArztAuskunftScraper(BaseScraper):
     def _name_from_slug(self, slug: str) -> dict | None:
         """Fallback: extract name from URL slug like 'dr-med-firstname-lastname'."""
         # Reject institution slugs
-        if any(kw in slug.lower() for kw in ("klinik", "krankenhaus", "praxis", "zentrum",
-                "mvz", "gmbh", "institut", "hospital", "bergmannsheil", "charite")):
+        if any(kw in slug.lower() for kw in (
+                "klinik", "kliniken", "krankenhaus", "hospital", "clinic", "praxis",
+                "zentrum", "center", "centrum", "institut", "universit", "berufsgen",
+                "gemeinschaftspraxis", "mvz", "gmbh", "ggmbh", "gbr",
+                "stiftung", "akademie", "ambulanz", "abteilung", "bergmannsheil",
+                "charite", "asklepios", "helios", "vivantes", "agaplesion",
+                "ameos", "atos", "sana-", "diakonie", "diakovere", "caritas",
+                "evangelisch", "kathol", "residenz", "campus",
+                "bundeswehr", "fachärzte", "facharzte")):
             return None
         parts = slug.split("-")
         title_words = {"dr", "med", "prof", "priv", "doz", "dent", "habil", "dipl", "univ"}

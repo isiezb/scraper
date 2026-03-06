@@ -174,7 +174,7 @@ def run_all():
         cur.execute("""
             DELETE FROM aerzte WHERE source = 'arztauskunft_de'
             AND (LOWER(vorname) || ' ' || LOWER(nachname)) ~*
-                '(klinik|krankenhaus|praxis|zentrum|institut|universit|berufsgenossenschaft|mvz|gmbh|hospital|bergmannsheil|charit|ambulanz|beta klinik)'
+                '(klinik|kliniken|krankenhaus|hospital|clinic|praxis|zentrum|center|centrum|institut|universit|berufsgen|gemeinschaftspraxis|mvz|gmbh|ggmbh|gbr|stiftung|akademie|ambulanz|abteilung|bergmannsheil|charit|asklepios|helios|vivantes|agaplesion|ameos|atos|sana |diakonie|diakovere|caritas|evangelisch|evang\.|kathol|residenz|campus|bundeswehr|fach.rzte|e\.v\.|co\. kg)'
         """)
         if cur.rowcount:
             logger.info(f"Deleted {cur.rowcount} institution records mistakenly saved as doctors")

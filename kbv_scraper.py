@@ -29,11 +29,6 @@ SEARCH_FILTERS = [
         "kategorie": "koerper",
         "filters": [{"title": "Zusatzqualifikation", "fieldName": "zbk", "selectedCodes": ["175"]}],
     },
-    {
-        "label": "Mund-Kiefer-Gesichtschirurgie",
-        "kategorie": "gesicht",
-        "filters": [{"title": "Fachgebiet Kategorie", "fieldName": "fgg", "selectedCodes": ["24"]}],
-    },
 ]
 
 # Search grid: German cities spaced ~100km apart for full coverage

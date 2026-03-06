@@ -98,16 +98,18 @@ class AerztekammerScraper(BaseScraper):
 
             self.logger.info(f"Scraping: {kammer['name']} ({kuerzel})")
             try:
+                completed = True
                 if kuerzel in self.API_KAMMERN:
                     self._scrape_kammer_api(kammer)
                 elif kuerzel in self.CUSTOM_KAMMERN:
-                    self._scrape_custom(kammer)
+                    completed = self._scrape_custom(kammer) is not False
                 elif kammer.get("needs_js"):
                     self._scrape_kammer_js(kammer)
                 else:
                     self._scrape_kammer(kammer)
-                # Mark this Kammer as completed
-                self.save_progress(f"kammer_{kuerzel}", 0, completed=True)
+                # Mark this Kammer as completed (unless scraper signaled incomplete)
+                if completed:
+                    self.save_progress(f"kammer_{kuerzel}", 0, completed=True)
             except Exception as e:
                 self.logger.error(f"Failed {kammer['name']}: {e}")
             self.wait()
@@ -118,9 +120,10 @@ class AerztekammerScraper(BaseScraper):
         self.finalize()
 
     def _scrape_custom(self, kammer: dict):
-        """Route to custom scrapers."""
+        """Route to custom scrapers. Returns False if scraper didn't complete."""
         if kammer["kuerzel"] == "AEKBW":
-            self._scrape_bw(kammer)
+            return self._scrape_bw(kammer)
+        return True
 
     # ── API-based Kammern ────────────────────────────────────────────
 
@@ -342,7 +345,7 @@ class AerztekammerScraper(BaseScraper):
                 consecutive_failures += 1
                 if consecutive_failures >= 3:
                     self.logger.warning(f"  BW: 3 consecutive failures at offset {offset}, stopping (will retry next run)")
-                    return  # Don't mark as completed
+                    return False  # Don't mark as completed
                 # Wait longer before retry
                 self.logger.info(f"  BW: retry after failure (attempt {consecutive_failures}/3), waiting 10s...")
                 time.sleep(10)
@@ -373,6 +376,7 @@ class AerztekammerScraper(BaseScraper):
         # Mark BW as completed
         self.save_progress("bw", offset, completed=True)
         self.logger.info(f"  BW: completed (final offset {offset})")
+        return True
 
     def _parse_bw_row(self, row) -> dict | None:
         """Parse a BW arztsuche result row."""

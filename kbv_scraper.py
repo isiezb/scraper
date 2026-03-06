@@ -16,6 +16,42 @@ API_URL = "https://arztsuche.116117.de/api/data"
 API_USER = "bdps"
 API_PASS = "fkr493mvg_f"
 
+# PLZ prefix → Bundesland mapping (first 1-2 digits of German PLZ)
+PLZ_BUNDESLAND = {
+    "01": "Sachsen", "02": "Sachsen", "03": "Brandenburg", "04": "Sachsen",
+    "06": "Sachsen-Anhalt", "07": "Thüringen", "08": "Sachsen", "09": "Sachsen",
+    "10": "Berlin", "12": "Berlin", "13": "Berlin", "14": "Brandenburg",
+    "15": "Brandenburg", "16": "Brandenburg", "17": "Mecklenburg-Vorpommern",
+    "18": "Mecklenburg-Vorpommern", "19": "Mecklenburg-Vorpommern",
+    "20": "Hamburg", "21": "Niedersachsen", "22": "Hamburg", "23": "Schleswig-Holstein",
+    "24": "Schleswig-Holstein", "25": "Schleswig-Holstein", "26": "Niedersachsen",
+    "27": "Niedersachsen", "28": "Bremen", "29": "Niedersachsen",
+    "30": "Niedersachsen", "31": "Niedersachsen", "32": "Nordrhein-Westfalen",
+    "33": "Nordrhein-Westfalen", "34": "Hessen", "35": "Hessen",
+    "36": "Hessen", "37": "Niedersachsen", "38": "Niedersachsen",
+    "39": "Sachsen-Anhalt",
+    "40": "Nordrhein-Westfalen", "41": "Nordrhein-Westfalen", "42": "Nordrhein-Westfalen",
+    "44": "Nordrhein-Westfalen", "45": "Nordrhein-Westfalen", "46": "Nordrhein-Westfalen",
+    "47": "Nordrhein-Westfalen", "48": "Nordrhein-Westfalen", "49": "Niedersachsen",
+    "50": "Nordrhein-Westfalen", "51": "Nordrhein-Westfalen", "52": "Nordrhein-Westfalen",
+    "53": "Nordrhein-Westfalen", "54": "Rheinland-Pfalz", "55": "Rheinland-Pfalz",
+    "56": "Rheinland-Pfalz", "57": "Nordrhein-Westfalen", "58": "Nordrhein-Westfalen",
+    "59": "Nordrhein-Westfalen",
+    "60": "Hessen", "61": "Hessen", "63": "Hessen", "64": "Hessen",
+    "65": "Hessen", "66": "Saarland", "67": "Rheinland-Pfalz",
+    "68": "Baden-Württemberg", "69": "Baden-Württemberg",
+    "70": "Baden-Württemberg", "71": "Baden-Württemberg", "72": "Baden-Württemberg",
+    "73": "Baden-Württemberg", "74": "Baden-Württemberg", "75": "Baden-Württemberg",
+    "76": "Baden-Württemberg", "77": "Baden-Württemberg", "78": "Baden-Württemberg",
+    "79": "Baden-Württemberg",
+    "80": "Bayern", "81": "Bayern", "82": "Bayern", "83": "Bayern",
+    "84": "Bayern", "85": "Bayern", "86": "Bayern", "87": "Bayern",
+    "88": "Baden-Württemberg", "89": "Baden-Württemberg",
+    "90": "Bayern", "91": "Bayern", "92": "Bayern", "93": "Bayern",
+    "94": "Bayern", "95": "Bayern", "96": "Bayern", "97": "Bayern",
+    "98": "Thüringen", "99": "Thüringen",
+}
+
 # Filter definitions matching the 116117 API's internal codes
 # fgf = Fachgebiet (specific specialty), zbk = Zusatzqualifikation
 SEARCH_FILTERS = [
@@ -26,38 +62,82 @@ SEARCH_FILTERS = [
     },
 ]
 
-# Search grid: German cities spaced ~100km apart for full coverage
+# Search grid: German cities spaced ~50km apart for full coverage.
+# Uses 50km radius to stay under the API's 50-result limit per query.
 SEARCH_LOCATIONS = [
-    {"name": "Berlin", "lat": 52.520, "lon": 13.405},
-    {"name": "Hamburg", "lat": 53.551, "lon": 9.994},
-    {"name": "München", "lat": 48.137, "lon": 11.576},
-    {"name": "Köln", "lat": 50.938, "lon": 6.960},
-    {"name": "Frankfurt", "lat": 50.110, "lon": 8.682},
-    {"name": "Stuttgart", "lat": 48.776, "lon": 9.183},
-    {"name": "Düsseldorf", "lat": 51.228, "lon": 6.774},
-    {"name": "Leipzig", "lat": 51.340, "lon": 12.375},
-    {"name": "Dresden", "lat": 51.051, "lon": 13.738},
-    {"name": "Hannover", "lat": 52.376, "lon": 9.732},
-    {"name": "Nürnberg", "lat": 49.452, "lon": 11.077},
-    {"name": "Dortmund", "lat": 51.514, "lon": 7.468},
-    {"name": "Bremen", "lat": 53.080, "lon": 8.801},
-    {"name": "Essen", "lat": 51.457, "lon": 7.012},
-    {"name": "Freiburg", "lat": 47.999, "lon": 7.842},
-    {"name": "Rostock", "lat": 54.092, "lon": 12.099},
+    # Northern Germany
     {"name": "Kiel", "lat": 54.323, "lon": 10.123},
-    {"name": "Saarbrücken", "lat": 49.234, "lon": 6.997},
-    {"name": "Erfurt", "lat": 50.978, "lon": 11.029},
-    {"name": "Magdeburg", "lat": 52.121, "lon": 11.628},
-    {"name": "Potsdam", "lat": 52.391, "lon": 13.064},
+    {"name": "Flensburg", "lat": 54.787, "lon": 9.437},
+    {"name": "Lübeck", "lat": 53.866, "lon": 10.687},
+    {"name": "Hamburg", "lat": 53.551, "lon": 9.994},
+    {"name": "Rostock", "lat": 54.092, "lon": 12.099},
+    {"name": "Schwerin", "lat": 53.636, "lon": 11.401},
+    {"name": "Bremen", "lat": 53.080, "lon": 8.801},
+    {"name": "Oldenburg", "lat": 53.143, "lon": 8.214},
+    # NRW — dense area, needs fine grid
+    {"name": "Düsseldorf", "lat": 51.228, "lon": 6.774},
+    {"name": "Köln", "lat": 50.938, "lon": 6.960},
+    {"name": "Bonn", "lat": 50.737, "lon": 7.099},
+    {"name": "Aachen", "lat": 50.776, "lon": 6.084},
+    {"name": "Essen", "lat": 51.457, "lon": 7.012},
+    {"name": "Dortmund", "lat": 51.514, "lon": 7.468},
+    {"name": "Duisburg", "lat": 51.435, "lon": 6.763},
+    {"name": "Wuppertal", "lat": 51.256, "lon": 7.150},
+    {"name": "Münster", "lat": 51.961, "lon": 7.626},
+    {"name": "Bielefeld", "lat": 52.022, "lon": 8.532},
+    {"name": "Paderborn", "lat": 51.719, "lon": 8.757},
+    {"name": "Siegen", "lat": 50.875, "lon": 8.024},
+    # Niedersachsen
+    {"name": "Hannover", "lat": 52.376, "lon": 9.732},
+    {"name": "Braunschweig", "lat": 52.269, "lon": 10.521},
+    {"name": "Osnabrück", "lat": 52.280, "lon": 8.043},
+    {"name": "Göttingen", "lat": 51.534, "lon": 9.935},
+    # Hessen / Rhein-Main — dense area
+    {"name": "Frankfurt", "lat": 50.110, "lon": 8.682},
+    {"name": "Wiesbaden", "lat": 50.083, "lon": 8.240},
+    {"name": "Darmstadt", "lat": 49.872, "lon": 8.651},
     {"name": "Mainz", "lat": 49.993, "lon": 8.247},
     {"name": "Kassel", "lat": 51.313, "lon": 9.497},
+    {"name": "Gießen", "lat": 50.584, "lon": 8.678},
+    {"name": "Mannheim", "lat": 49.489, "lon": 8.467},
+    {"name": "Heidelberg", "lat": 49.399, "lon": 8.672},
+    # Rheinland-Pfalz / Saarland
+    {"name": "Koblenz", "lat": 50.357, "lon": 7.589},
+    {"name": "Trier", "lat": 49.750, "lon": 6.637},
+    {"name": "Saarbrücken", "lat": 49.234, "lon": 6.997},
+    {"name": "Kaiserslautern", "lat": 49.444, "lon": 7.769},
+    # Baden-Württemberg
+    {"name": "Stuttgart", "lat": 48.776, "lon": 9.183},
+    {"name": "Karlsruhe", "lat": 49.007, "lon": 8.404},
+    {"name": "Freiburg", "lat": 47.999, "lon": 7.842},
+    {"name": "Ulm", "lat": 48.402, "lon": 9.988},
+    {"name": "Konstanz", "lat": 47.660, "lon": 9.175},
+    {"name": "Heilbronn", "lat": 49.142, "lon": 9.220},
+    {"name": "Tübingen", "lat": 48.522, "lon": 9.058},
+    # Bayern
+    {"name": "München", "lat": 48.137, "lon": 11.576},
+    {"name": "Nürnberg", "lat": 49.452, "lon": 11.077},
     {"name": "Augsburg", "lat": 48.366, "lon": 10.899},
     {"name": "Regensburg", "lat": 49.013, "lon": 12.102},
     {"name": "Würzburg", "lat": 49.794, "lon": 9.929},
-    {"name": "Mannheim", "lat": 49.489, "lon": 8.467},
-    {"name": "Ulm", "lat": 48.402, "lon": 9.988},
-    {"name": "Oldenburg", "lat": 53.143, "lon": 8.214},
-    {"name": "Göttingen", "lat": 51.534, "lon": 9.935},
+    {"name": "Ingolstadt", "lat": 48.764, "lon": 11.425},
+    {"name": "Passau", "lat": 48.574, "lon": 13.451},
+    {"name": "Bayreuth", "lat": 49.946, "lon": 11.578},
+    {"name": "Rosenheim", "lat": 47.856, "lon": 12.129},
+    # Berlin / Brandenburg
+    {"name": "Berlin", "lat": 52.520, "lon": 13.405},
+    {"name": "Potsdam", "lat": 52.391, "lon": 13.064},
+    {"name": "Cottbus", "lat": 51.761, "lon": 14.335},
+    # Sachsen
+    {"name": "Dresden", "lat": 51.051, "lon": 13.738},
+    {"name": "Leipzig", "lat": 51.340, "lon": 12.375},
+    {"name": "Chemnitz", "lat": 50.828, "lon": 12.921},
+    # Sachsen-Anhalt
+    {"name": "Magdeburg", "lat": 52.121, "lon": 11.628},
+    {"name": "Halle", "lat": 51.482, "lon": 11.970},
+    # Thüringen
+    {"name": "Erfurt", "lat": 50.978, "lon": 11.029},
+    {"name": "Jena", "lat": 50.928, "lon": 11.586},
 ]
 
 
@@ -135,7 +215,7 @@ class KBVScraper(BaseScraper):
             req_val = _gen_req_val(lat, lon)
 
             body = {
-                "r": 100,
+                "r": 50,
                 "locType": "LATLON",
                 "lat": lat,
                 "lon": lon,
@@ -264,6 +344,9 @@ class KBVScraper(BaseScraper):
         # which is too generic for our directory.
         facharzttitel = "Plastische und Ästhetische Chirurgie"
 
+        plz = data.get("plz", "")
+        bundesland = PLZ_BUNDESLAND.get(str(plz)[:2]) if plz else None
+
         arzt_data = {
             "vorname": vorname,
             "nachname": nachname,
@@ -274,7 +357,8 @@ class KBVScraper(BaseScraper):
             "selbstbezeichnung": facharzttitel,
             "land": "DE",
             "stadt": data.get("ort"),
-            "plz": data.get("plz"),
+            "bundesland": bundesland,
+            "plz": plz or None,
             "strasse": strasse or None,
             "seo_slug": slug,
             "datenquelle": "kbv_116117",

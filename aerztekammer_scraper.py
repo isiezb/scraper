@@ -64,13 +64,13 @@ class AerztekammerScraper(BaseScraper):
         super().close()
 
     # Kammern that use direct JSON APIs (no HTML parsing needed)
-    API_KAMMERN = {"AEKNO", "AEKHESSEN", "AEKHH", "AEKSL"}
+    API_KAMMERN = {"AEKNO", "AEKHESSEN", "AEKHH", "AEKSL", "LAEKB", "AEKB"}
     # Kammern with custom scrapers
     CUSTOM_KAMMERN = {"AEKBW"}
     # Kammern known to have NO public Arztsuche (skip silently)
     SKIP_KAMMERN = {
         "BLAEK",     # Bayern — no public Arztsuche, use 116117.de
-        "AEKB",      # Berlin — no working Arztsuche URL
+        # "AEKB" removed — Berlin has working Arztsuche at aerzte-berlin.de
         "AEKHB",     # Bremen — no public Arztsuche
         "AEKMV",     # Mecklenburg-VP — no public Arztsuche
         "AEKN",      # Niedersachsen — no public Arztsuche, use 116117.de
@@ -79,7 +79,7 @@ class AerztekammerScraper(BaseScraper):
         "AEKSA",     # Sachsen-Anhalt — no direct Arztsuche
         "AEKSH",     # Schleswig-Holstein — no public Arztsuche
         "LAEKTH",    # Thüringen — no public Arztsuche
-        "LAEKB",     # Brandenburg — no Kammer Arztsuche, KV portal only
+        # "LAEKB" removed — Brandenburg has working TYPO3 Arztsuche
         "AEKWL",     # Westfalen-Lippe — ExtJS app too complex
     }
 
@@ -139,6 +139,10 @@ class AerztekammerScraper(BaseScraper):
             self._scrape_hamburg(kammer)
         elif kammer["kuerzel"] == "AEKSL":
             self._scrape_saarland(kammer)
+        elif kammer["kuerzel"] == "LAEKB":
+            self._scrape_brandenburg(kammer)
+        elif kammer["kuerzel"] == "AEKB":
+            self._scrape_berlin(kammer)
 
     def _scrape_kvno(self, kammer: dict):
         """Scrape Nordrhein via KVNO JSON API (arztsuche.kvno.de)."""
@@ -505,6 +509,261 @@ class AerztekammerScraper(BaseScraper):
             if extras:
                 doctor["schwerpunkte"] = ", ".join(extras)
 
+        return doctor
+
+    # ── Brandenburg (LAEKB — TYPO3 directories POST) ────────────────
+
+    def _scrape_brandenburg(self, kammer: dict):
+        """Scrape Brandenburg via LAEKB TYPO3 directories extension.
+
+        POST to /service/verzeichnisse/aerzte with qualification filters:
+        - 126 = FA Plastische und Ästhetische Chirurgie
+        - 32  = Plastische Operationen (Zusatzbezeichnung)
+        """
+        url = "https://www.laekb.de/service/verzeichnisse/aerzte"
+        qualification_filters = [
+            ("126", "FA Plastische und Ästhetische Chirurgie"),
+            ("32", "Plastische Operationen"),
+        ]
+        count = 0
+
+        for qual_id, qual_label in qualification_filters:
+            self.logger.info(f"  Brandenburg: searching {qual_label} (id={qual_id})")
+            try:
+                resp = self.session.post(
+                    url,
+                    data={
+                        "tx_directories_aerztelist[relation_qualification]": qual_id,
+                    },
+                    timeout=30,
+                )
+                if resp.status_code != 200:
+                    self.logger.warning(f"  Brandenburg {qual_label}: HTTP {resp.status_code}")
+                    continue
+
+                soup = BeautifulSoup(resp.text, "html.parser")
+                items = soup.select("div.directories-item")
+                self.logger.info(f"  Brandenburg {qual_label}: {len(items)} entries")
+
+                for item in items:
+                    try:
+                        doctor = self._parse_brandenburg_entry(item)
+                        if doctor:
+                            doctor["bundesland"] = "Brandenburg"
+                            doctor["land"] = "DE"
+                            self.upsert_doctor(doctor)
+                            count += 1
+                    except Exception as e:
+                        self.logger.error(f"  Failed parsing Brandenburg entry: {e}")
+
+            except Exception as e:
+                self.logger.error(f"  Brandenburg {qual_label} request failed: {e}")
+
+            self.wait()
+
+        self.logger.info(f"  Brandenburg: processed {count} plastic surgeons")
+
+    def _parse_brandenburg_entry(self, item) -> dict | None:
+        """Parse a Brandenburg TYPO3 directories entry."""
+        name_el = item.select_one("h3")
+        if not name_el:
+            return None
+
+        name_text = name_el.get_text(strip=True)
+        if not name_text or len(name_text) < 4:
+            return None
+
+        name_data = self._extract_name_from_text(name_text)
+        if not name_data:
+            return None
+
+        doctor = {**name_data, "facharzttitel": "Plastische und Ästhetische Chirurgie"}
+
+        # Extract dt/dd pairs
+        for dt in item.select("dt"):
+            label = dt.get_text(strip=True).rstrip(":")
+            dd = dt.find_next_sibling("dd")
+            if not dd:
+                continue
+            value = dd.get_text(strip=True)
+            value = re.sub(r"\s+", " ", value)
+
+            if label == "Qualifikation":
+                doctor["schwerpunkte"] = value
+            elif label == "Adresse":
+                # Address has <br> between street and PLZ/city
+                addr_parts = [p.strip() for p in re.split(r"<br\s*/?>", dd.decode_contents()) if p.strip()]
+                for part in addr_parts:
+                    clean = re.sub(r"<[^>]+>", "", part).strip()
+                    plz_match = re.match(r"(\d{5})\s+(.+)", clean)
+                    if plz_match:
+                        doctor["plz"] = plz_match.group(1)
+                        doctor["stadt"] = plz_match.group(2).strip()
+                    elif clean and len(clean) > 3 and not doctor.get("strasse"):
+                        doctor["strasse"] = clean
+            elif label == "Telefon":
+                doctor["telefon"] = value
+            elif label == "Telefax":
+                doctor["fax"] = value
+            elif label == "E-Mail":
+                email_link = dd.select_one("a[href^='mailto:']")
+                if email_link:
+                    doctor["email"] = email_link.get_text(strip=True)
+                else:
+                    doctor["email"] = value
+            elif label == "Website":
+                link = dd.select_one("a[href]")
+                if link:
+                    href = link.get("href", "")
+                    if not href.startswith("http"):
+                        href = f"https://{href}"
+                    doctor["website_url"] = href
+                elif value:
+                    if not value.startswith("http"):
+                        value = f"https://{value}"
+                    doctor["website_url"] = value
+
+        return doctor
+
+    # ── Berlin (aerzte-berlin.de — old PHP POST form) ────────────────
+
+    def _scrape_berlin(self, kammer: dict):
+        """Scrape Berlin via aerzte-berlin.de PHP form.
+
+        POST to dbsuche.php with Fach codes:
+        - 60 = Plastische Chirurgie
+        - 61 = Plastische Operationen
+        - 112 = Aesthetische Chirurgie
+        Then fetch detail pages for full data.
+        """
+        base_url = "http://www.aerzte-berlin.de/_php/therapie30"
+        search_url = f"{base_url}/dbsuche.php"
+        fach_codes = [
+            ("60", "Plastische Chirurgie"),
+            ("61", "Plastische Operationen"),
+            ("112", "Aesthetische Chirurgie"),
+        ]
+        seen_ids = set()
+        count = 0
+
+        for fach_id, fach_label in fach_codes:
+            self.logger.info(f"  Berlin: searching {fach_label} (Fach={fach_id})")
+            try:
+                resp = self.session.post(
+                    search_url,
+                    data={"Fach": fach_id, "Limit": "100", "sortierung": ""},
+                    timeout=30,
+                )
+                if resp.status_code != 200:
+                    self.logger.warning(f"  Berlin {fach_label}: HTTP {resp.status_code}")
+                    continue
+
+                html = resp.content.decode("latin-1")
+                detail_ids = set(re.findall(r"arzt_detail\.php\?id=(\d+)", html))
+                new_ids = detail_ids - seen_ids
+                seen_ids.update(detail_ids)
+
+                self.logger.info(f"  Berlin {fach_label}: {len(detail_ids)} entries ({len(new_ids)} new)")
+
+                for doc_id in new_ids:
+                    try:
+                        doctor = self._fetch_berlin_detail(base_url, doc_id)
+                        if doctor:
+                            doctor["bundesland"] = "Berlin"
+                            doctor["land"] = "DE"
+                            self.upsert_doctor(doctor)
+                            count += 1
+                    except Exception as e:
+                        self.logger.error(f"  Failed Berlin detail {doc_id}: {e}")
+                    self.wait()
+
+            except Exception as e:
+                self.logger.error(f"  Berlin {fach_label} request failed: {e}")
+
+        self.logger.info(f"  Berlin: processed {count} plastic surgeons")
+
+    def _fetch_berlin_detail(self, base_url: str, doc_id: str) -> dict | None:
+        """Fetch and parse a Berlin doctor detail page."""
+        url = f"{base_url}/arzt_detail.php?id={doc_id}"
+        resp = self.session.get(url, timeout=15)
+        if resp.status_code != 200:
+            return None
+
+        html = resp.content.decode("latin-1")
+        soup = BeautifulSoup(html, "html.parser")
+
+        # Extract text content, split by tags
+        text = soup.get_text(separator="\n")
+        lines = [l.strip() for l in text.split("\n") if l.strip() and l.strip() != "\xa0"]
+
+        doctor = {"facharzttitel": "Plastische und Ästhetische Chirurgie"}
+
+        # First meaningful line after "Praxis" or "Ärztehaus" is the name
+        name_found = False
+        in_fachrichtung = False
+        in_schwerpunkte = False
+        fachrichtungen = []
+        schwerpunkte = []
+
+        for i, line in enumerate(lines):
+            if "Detailansicht" in line:
+                continue
+            if line in ("Praxis", "Ärztehaus", "Gemeinschaftspraxis", "Klinik"):
+                continue
+
+            # Name line: contains Dr. or Prof. and a surname
+            if not name_found and any(t in line for t in ("Dr.", "Prof.", "med.")):
+                name_data = self._extract_name_from_text(line)
+                if name_data:
+                    doctor.update(name_data)
+                    name_found = True
+                continue
+
+            # Address: PLZ pattern
+            plz_match = re.match(r"(\d{5})\s+Berlin(?:\s*-\s*(.+))?", line)
+            if plz_match:
+                doctor["plz"] = plz_match.group(1)
+                doctor["stadt"] = "Berlin"
+                continue
+
+            # Street: line before PLZ, contains numbers
+            if not doctor.get("strasse") and re.search(r"\d", line) and not line.startswith("030"):
+                if not any(x in line for x in ("Fach", "Therap", "Fremd", "©", "aerzte")):
+                    doctor["strasse"] = line
+                    continue
+
+            # Phone
+            if line.startswith("030") or line.startswith("+49"):
+                if not doctor.get("telefon"):
+                    doctor["telefon"] = line
+                continue
+
+            # Section markers
+            if "Fachrichtung" in line:
+                in_fachrichtung = True
+                in_schwerpunkte = False
+                continue
+            if "Therapieschwerpunkt" in line:
+                in_schwerpunkte = True
+                in_fachrichtung = False
+                continue
+            if "Fremdsprachen" in line or "©" in line:
+                in_fachrichtung = False
+                in_schwerpunkte = False
+                continue
+
+            if in_fachrichtung and line:
+                fachrichtungen.append(line)
+            if in_schwerpunkte and line:
+                schwerpunkte.append(line)
+
+        if not name_found:
+            return None
+
+        if schwerpunkte:
+            doctor["schwerpunkte"] = ", ".join(schwerpunkte)
+
+        doctor["quelle_url"] = f"http://www.aerzte-berlin.de/_php/therapie30/arzt_detail.php?id={doc_id}"
         return doctor
 
     # ── BW (arztsuche-bw.de — static HTML GET) ──────────────────────

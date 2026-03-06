@@ -26,6 +26,7 @@ from aerztekammer_scraper import AerztekammerScraper
 from kbv_scraper import KBVScraper
 from oegk_scraper import OEGKScraper
 from dgpraec_scraper import DGPRAECScraper
+from arztauskunft_scraper import ArztAuskunftScraper
 print("All scraper modules imported OK", flush=True)
 
 logging.basicConfig(
@@ -40,6 +41,7 @@ PARALLEL_SCRAPERS = [
     # MedRegScraper,        # CH: disabled — medregom.admin.ch returning 503
     AerztekammerScraper,  # DE: all 17 Landesärztekammern + DGPRÄC nationwide
     KBVScraper,           # DE: 116117.de — nationwide GKV-zugelassene Ärzte
+    ArztAuskunftScraper,  # DE: Stiftung Gesundheit — comprehensive (ALL doctors)
     # OEGKScraper,          # AT: disabled — returns 0 results, Playwright too slow
 ]
 

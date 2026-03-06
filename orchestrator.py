@@ -170,6 +170,26 @@ def run_all():
         cur.execute("DELETE FROM aerzte WHERE vorname = 'Mehr' AND nachname = 'Details'")
         if cur.rowcount:
             logger.info(f"Deleted {cur.rowcount} corrupted 'Mehr Details' record(s)")
+        # Delete institution records scraped as doctors
+        cur.execute("""
+            DELETE FROM aerzte WHERE source = 'arztauskunft_de'
+            AND (LOWER(vorname) || ' ' || LOWER(nachname)) ~*
+                '(klinik|krankenhaus|praxis|zentrum|institut|universit|berufsgenossenschaft|mvz|gmbh|hospital|bergmannsheil|charit|ambulanz|beta klinik)'
+        """)
+        if cur.rowcount:
+            logger.info(f"Deleted {cur.rowcount} institution records mistakenly saved as doctors")
+        # Fix mojibake in city names (UTF-8 decoded as Latin-1)
+        cur.execute("UPDATE aerzte SET stadt = REPLACE(stadt, 'Ã¶', 'ö') WHERE stadt LIKE '%Ã¶%'")
+        cur.execute("UPDATE aerzte SET stadt = REPLACE(stadt, 'Ã¼', 'ü') WHERE stadt LIKE '%Ã¼%'")
+        cur.execute("UPDATE aerzte SET stadt = REPLACE(stadt, 'Ã¤', 'ä') WHERE stadt LIKE '%Ã¤%'")
+        cur.execute("UPDATE aerzte SET stadt = REPLACE(stadt, 'Ã\x9f', 'ß') WHERE stadt LIKE '%Ã\x9f%'")
+        cur.execute("UPDATE aerzte SET stadt = REPLACE(stadt, 'Ã', 'Ü') WHERE stadt LIKE '%Ã%'")
+        # Also fix in vorname/nachname
+        for col in ('vorname', 'nachname', 'stadt', 'strasse'):
+            cur.execute(f"UPDATE aerzte SET {col} = REPLACE({col}, 'Ã¶', 'ö') WHERE {col} LIKE '%Ã¶%'")
+            cur.execute(f"UPDATE aerzte SET {col} = REPLACE({col}, 'Ã¼', 'ü') WHERE {col} LIKE '%Ã¼%'")
+            cur.execute(f"UPDATE aerzte SET {col} = REPLACE({col}, 'Ã¤', 'ä') WHERE {col} LIKE '%Ã¤%'")
+        logger.info("Fixed mojibake encoding in city/name fields")
         conn.commit()
         cur.close()
         conn.close()

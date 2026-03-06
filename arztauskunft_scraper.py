@@ -62,6 +62,8 @@ class ArztAuskunftScraper(BaseScraper):
                 self.logger.error(f"  {label} page {page} fetch failed: {e}")
                 break
 
+            # Force UTF-8 to avoid mojibake (KÃ¶ln → Köln)
+            resp.encoding = "utf-8"
             soup = BeautifulSoup(resp.text, "lxml")
 
             # Find all profile links
@@ -179,10 +181,10 @@ class ArztAuskunftScraper(BaseScraper):
 
         # Extract city from URL slug
         city = city_slug.replace("-", " ").title()
-        # Fix common city name issues
-        city = re.sub(r"\bUe\b", "Ü", city)
-        city = re.sub(r"\bOe\b", "Ö", city)
-        city = re.sub(r"\bAe\b", "Ä", city)
+        # Fix common city name issues (e.g. Koeln → Köln, Muenchen → München)
+        city = city.replace("Ue", "Ü").replace("ue", "ü")
+        city = city.replace("Oe", "Ö").replace("oe", "ö")
+        city = city.replace("Ae", "Ä").replace("ae", "ä")
         doctor["stadt"] = city
 
         # Try to extract address from card text
@@ -195,10 +197,27 @@ class ArztAuskunftScraper(BaseScraper):
 
         return doctor
 
+    # Keywords that indicate an institution, not a person
+    INSTITUTION_KEYWORDS = {
+        "klinik", "kliniken", "krankenhaus", "hospital", "praxis", "zentrum",
+        "institut", "universitäts", "universität", "berufsgenossenschaft",
+        "gemeinschaftspraxis", "mvz", "gmbh", "ggmbh", "e.v.", "stiftung",
+        "akademie", "ambulanz", "abteilung", "bergmannsheil", "charite", "charité",
+    }
+
+    def _is_institution(self, text: str) -> bool:
+        """Check if text looks like an institution name rather than a person."""
+        lower = text.lower()
+        return any(kw in lower for kw in self.INSTITUTION_KEYWORDS)
+
     def _extract_name(self, text: str) -> dict | None:
         """Extract titel, vorname, nachname from display name."""
         text = text.strip()
         if not text or len(text) < 4:
+            return None
+
+        # Reject institution names
+        if self._is_institution(text):
             return None
 
         # Remove salutation
@@ -228,6 +247,10 @@ class ArztAuskunftScraper(BaseScraper):
 
     def _name_from_slug(self, slug: str) -> dict | None:
         """Fallback: extract name from URL slug like 'dr-med-firstname-lastname'."""
+        # Reject institution slugs
+        if any(kw in slug.lower() for kw in ("klinik", "krankenhaus", "praxis", "zentrum",
+                "mvz", "gmbh", "institut", "hospital", "bergmannsheil", "charite")):
+            return None
         parts = slug.split("-")
         title_words = {"dr", "med", "prof", "priv", "doz", "dent", "habil", "dipl", "univ"}
 

@@ -28,6 +28,7 @@ from oegk_scraper import OEGKScraper
 from dgpraec_scraper import DGPRAECScraper
 from arztauskunft_scraper import ArztAuskunftScraper
 from vdaepc_scraper import VDAEPCScraper
+from klinik_team_scraper import KlinikTeamScraper
 from profile_enrichment_scraper import ProfileEnrichmentScraper
 print("All scraper modules imported OK", flush=True)
 
@@ -46,6 +47,11 @@ PARALLEL_SCRAPERS = [
     ArztAuskunftScraper,  # DE: Stiftung Gesundheit — comprehensive (ALL doctors)
     VDAEPCScraper,        # DE: VDÄPC member directory — verified plastic surgeons
     # OEGKScraper,          # AT: disabled — returns 0 results, Playwright too slow
+]
+
+# Phase 1b: Playwright-based scrapers (sequential, heavy on browser resources)
+BROWSER_SCRAPERS = [
+    KlinikTeamScraper,    # DE: clinic team pages — employed surgeons at private clinics
 ]
 
 # Phase 2: enrichment only, must run after Phase 1
@@ -184,7 +190,7 @@ def run_all():
         cur.execute("""
             DELETE FROM aerzte WHERE source = 'arztauskunft_de'
             AND (LOWER(vorname) || ' ' || LOWER(nachname)) ~*
-                E'(klinik|kliniken|krankenhaus|hospital|clinic|clinicum|praxis|zentrum|center|centrum|institut|universit|berufsgen|gemeinschaftspraxis|mvz|gmbh|ggmbh|gbr|stiftung|akademie|ambulanz|abteilung|bergmannsheil|charit|asklepios|helios|vivantes|agaplesion|ameos|atos|sana |diakonie|diakovere|caritas|evangelisch|evang\\.|kathol|residenz|campus|bundeswehr|fach.rzte|e\\.v\\.|co\\. kg|.sthetik|aesthetic|surgery|chirurgia|esthetica|ethianum|medcenter|lubinus|dorow|beauty|lacomed|lipoedem|policum|standort|filiale|tagesklinik|fachklinik|medizinisch|operationszentrum|op.zentrum|med.plast|chirurgen|aasee|vital.residenz|park.clinic|stift|ev .stift)'
+                E'(klinik|kliniken|krankenhaus|hospital|clinic|clinicum|praxis|zentrum|center|centrum|institut|universit|berufsgen|gemeinschaftspraxis|mvz|gmbh|ggmbh|gbr|stiftung|akademie|ambulanz|abteilung|bergmannsheil|charit|asklepios|helios|vivantes|agaplesion|ameos|atos|sana |diakonie|diakovere|caritas|evangelisch|evang\\.|kathol|residenz|campus|bundeswehr|fach.rzte|e\\.v\\.|co\\. kg|.sthetik|aesthetic|surgery|chirurgia|esthetica|ethianum|medcenter|lubinus|beauty|lacomed|lipoedem|policum|standort|filiale|tagesklinik|fachklinik|medizinisch|operationszentrum|op.zentrum|med.plast|chirurgen|aasee|vital.residenz|park.clinic|stift|ev .stift)'
         """)
         if cur.rowcount:
             logger.info(f"Deleted {cur.rowcount} institution records mistakenly saved as doctors")
@@ -214,6 +220,18 @@ def run_all():
             name, success = future.result()
             status = "OK" if success else "FAILED"
             logger.info(f"  {name}: {status}")
+
+    # Phase 1b: Browser-based scrapers (sequential, use Playwright)
+    logger.info("Phase 1b: Running browser-based scrapers...")
+    for scraper_cls in BROWSER_SCRAPERS:
+        scraper = scraper_cls()
+        try:
+            logger.info(f"Running {scraper.name}...")
+            scraper.run()
+        except Exception as e:
+            logger.error(f"{scraper.name} failed: {e}")
+        finally:
+            scraper.close()
 
     # Phase 2: Enrichment scrapers (sequential, need Phase 1 data)
     logger.info("Phase 2: Running enrichment scrapers...")

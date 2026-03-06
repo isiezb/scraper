@@ -144,20 +144,6 @@ def run_all():
     logger.info("Starting scraper run")
     init_db()
 
-    # Reset BW progress so it retries (was wrongly marked completed after rate-limit)
-    try:
-        from db import get_conn
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute("UPDATE scraper_progress SET completed = FALSE WHERE source_key = 'bw' AND completed = TRUE")
-        if cur.rowcount:
-            logger.info("Reset BW scraper progress (was wrongly marked completed)")
-        conn.commit()
-        cur.close()
-        conn.close()
-    except Exception as e:
-        logger.warning(f"Could not reset BW progress: {e}")
-
     # One-time dedup of existing records
     try:
         _dedup_existing()

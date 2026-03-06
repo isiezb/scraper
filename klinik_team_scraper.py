@@ -36,20 +36,15 @@ KLINIKEN = [
     {"name": "Mannheimer Klinik", "team_url": "https://www.beautyclinic.de/das-team/", "stadt": "Mannheim", "bundesland": "Baden-Württemberg"},
 ]
 
-# Patterns indicating a link points to a doctor profile
-DOCTOR_LINK_PATTERNS = re.compile(
-    r"(dr[.-]|prof[.-]|facharzt|fach.rztin|arzt|.rztin|/team/|/aerzte/|/doctors/|/physicians/|/specialists/)",
-    re.IGNORECASE,
-)
-
-# Patterns for Facharzttitel in plastic surgery
+# Patterns for Facharzttitel — must be specific to avoid false positives.
+# "Plastische Chirurgie" alone is too broad (matches clinic descriptions).
+# We require either "Facharzt/Fachärztin für" prefix or the full compound title.
 FACHARZT_PATTERNS = [
     re.compile(r"Fach(?:arzt|ärztin)\s+für\s+Plastische", re.IGNORECASE),
+    re.compile(r"Fach(?:arzt|ärztin)\s+für\s+Plastic", re.IGNORECASE),
     re.compile(r"Plastische\s+und\s+Ästhetische\s+Chirurgie", re.IGNORECASE),
-    re.compile(r"Plastische\s+(?:&|und)\s+Ästhetische", re.IGNORECASE),
+    re.compile(r"Plastische\s+(?:&|und)\s+[ÄAa]sthetische", re.IGNORECASE),
     re.compile(r"Plastic\s+(?:and|&)\s+Aesthetic\s+Surg", re.IGNORECASE),
-    re.compile(r"Facharzt.*Plastische.*Chirurgie", re.IGNORECASE),
-    re.compile(r"Plastische\s+Chirurgie", re.IGNORECASE),
 ]
 
 # Title keywords
@@ -261,24 +256,37 @@ class KlinikTeamScraper(BaseScraper):
         """Parse a doctor profile page and save if they're a plastic surgeon."""
         from bs4 import BeautifulSoup
         soup = BeautifulSoup(html, "lxml")
-        page_text = soup.get_text(" ", strip=True)
-
-        # Check for Facharzt für Plastische Chirurgie
-        is_plastic = any(pat.search(page_text) for pat in FACHARZT_PATTERNS)
-        if not is_plastic:
-            return False
 
         # Extract name from h1 or h2
         name_data = None
+        name_tag = None
         for tag in soup.find_all(["h1", "h2"]):
             text = tag.get_text(strip=True)
-            if re.search(r"(dr|prof|med)", text, re.IGNORECASE) or len(text.split()) >= 2:
+            if re.search(r"(dr\.|prof\.)", text, re.IGNORECASE):
                 name_data = _parse_name(text)
                 if name_data:
+                    name_tag = tag
                     break
 
         if not name_data:
-            self.logger.warning(f"  Could not parse name from {url}")
+            return False
+
+        # Check for Facharzt title in the main content area (not just headers/footers).
+        # Look at: the article/main content, or the area around the doctor's name.
+        # Avoid matching "Klinik für Plastische Chirurgie" in site-wide nav/footer.
+        content_el = soup.find("main") or soup.find("article") or soup.find("div", class_=re.compile(r"content|entry|profile|bio|doctor", re.I))
+        if content_el:
+            check_text = content_el.get_text(" ", strip=True)
+        else:
+            # Fallback: use text near the name heading (parent + siblings)
+            parent = name_tag.parent if name_tag else None
+            if parent:
+                check_text = parent.get_text(" ", strip=True)
+            else:
+                check_text = soup.get_text(" ", strip=True)
+
+        is_plastic = any(pat.search(check_text) for pat in FACHARZT_PATTERNS)
+        if not is_plastic:
             return False
 
         # Build doctor record
@@ -297,14 +305,15 @@ class KlinikTeamScraper(BaseScraper):
             "quelle_url": url,
         }
 
-        # Try to extract more specific Facharzttitel
+        # Try to extract more specific Facharzttitel from content
         for pat in FACHARZT_PATTERNS:
-            m = pat.search(page_text)
+            m = pat.search(check_text)
             if m:
                 data["facharzttitel"] = m.group(0)
                 break
 
-        # Try to extract phone
+        # Try to extract phone from full page
+        page_text = soup.get_text(" ", strip=True)
         phone_match = re.search(r"(?:Tel|Telefon|Phone)[.:\s]*(\+?[\d\s/()-]{8,})", page_text)
         if phone_match:
             data["telefon"] = phone_match.group(1).strip()
@@ -323,7 +332,6 @@ class KlinikTeamScraper(BaseScraper):
         """Fallback: try to extract doctors directly from the team listing page."""
         from bs4 import BeautifulSoup
         soup = BeautifulSoup(html, "lxml")
-        page_text = soup.get_text(" ", strip=True)
         count = 0
 
         # Look for headings that contain doctor names
@@ -336,12 +344,19 @@ class KlinikTeamScraper(BaseScraper):
             if not name_data:
                 continue
 
-            # Check surrounding text for Facharzt pattern
+            # Check nearby context for Facharzt pattern.
+            # Walk up to find the card/container element, check its text.
+            context = ""
             parent = tag.parent
-            if parent:
+            # Go up max 3 levels to find context (card, list item, etc.)
+            for _ in range(3):
+                if parent is None:
+                    break
                 context = parent.get_text(" ", strip=True)
-            else:
-                context = page_text
+                # If context is large enough to be meaningful, use it
+                if len(context) > 50:
+                    break
+                parent = parent.parent
 
             is_plastic = any(pat.search(context) for pat in FACHARZT_PATTERNS)
             if not is_plastic:

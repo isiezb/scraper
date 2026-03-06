@@ -203,13 +203,23 @@ class VDAEPCScraper(BaseScraper):
             self.logger.info(f"Skipping non-DE member: {store} ({city}, {country})")
             return
 
+        # Validate specialty — VDÄPC is a plastic surgery society but some
+        # members may list a different primary Facharzttitel (e.g. MKG)
+        drspec = member.get("drspec", "").strip()
+        if drspec and not any(kw in drspec.lower() for kw in ["plastisch", "ästhetisch", "aesthetisch", "plastic"]):
+            # Has a specialty but it's not plastic surgery — still save since
+            # VDÄPC membership implies plastic surgery involvement
+            facharzttitel = drspec
+        else:
+            facharzttitel = drspec or "Facharzt für Plastische und Ästhetische Chirurgie"
+
         data = {
             "vorname": name["vorname"],
             "nachname": name["nachname"],
             "titel": name["titel"],
             "ist_facharzt": True,
-            "facharzttitel": member.get("drspec", "").strip() or "Facharzt für Plastische und Ästhetische Chirurgie",
-            "selbstbezeichnung": member.get("drspec", "").strip() or None,
+            "facharzttitel": facharzttitel,
+            "selbstbezeichnung": drspec or None,
             "plz": member.get("zip", "").strip() or None,
             "stadt": city or None,
             "bundesland": _guess_bundesland(city),

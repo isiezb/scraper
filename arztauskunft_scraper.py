@@ -212,7 +212,7 @@ class ArztAuskunftScraper(BaseScraper):
         "lacomed", "lipoedem", "policum", "standort", "filiale", "tagesklinik",
         "fachklinik", "medizinisch", "operationszentrum", "op-zentrum",
         "hautarzt", "hautklinik", "med-plast", "chirurgen", "aasee",
-        "vital", "park clinic", " rtz", "stift ",
+        "vital", "park clinic", " rtz", "stift", "ev ",
     }
 
     def _is_institution(self, text: str) -> bool:
@@ -271,7 +271,7 @@ class ArztAuskunftScraper(BaseScraper):
                 "beauty", "lacomed", "lipoedem", "policum", "standort",
                 "filiale", "tagesklinik", "fachklinik", "medizinisch",
                 "operationszentrum", "op-zentrum", "med-plast", "chirurgen",
-                "aasee", "vital-residenz", "park-clinic")):
+                "aasee", "vital-residenz", "park-clinic", "stift", "ev-stift")):
             return None
         parts = slug.split("-")
         title_words = {"dr", "med", "prof", "priv", "doz", "dent", "habil", "dipl", "univ"}

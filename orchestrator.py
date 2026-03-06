@@ -176,7 +176,7 @@ def run_all():
         cur.execute("""
             DELETE FROM aerzte WHERE source = 'arztauskunft_de'
             AND (LOWER(vorname) || ' ' || LOWER(nachname)) ~*
-                '(klinik|kliniken|krankenhaus|hospital|clinic|clinicum|praxis|zentrum|center|centrum|institut|universit|berufsgen|gemeinschaftspraxis|mvz|gmbh|ggmbh|gbr|stiftung|akademie|ambulanz|abteilung|bergmannsheil|charit|asklepios|helios|vivantes|agaplesion|ameos|atos|sana |diakonie|diakovere|caritas|evangelisch|evang\.|kathol|residenz|campus|bundeswehr|fach.rzte|e\.v\.|co\. kg|.sthetik|aesthetic|surgery|chirurgia|esthetica|ethianum|medcenter|lubinus|dorow|beauty|lacomed|lipoedem)'
+                '(klinik|kliniken|krankenhaus|hospital|clinic|clinicum|praxis|zentrum|center|centrum|institut|universit|berufsgen|gemeinschaftspraxis|mvz|gmbh|ggmbh|gbr|stiftung|akademie|ambulanz|abteilung|bergmannsheil|charit|asklepios|helios|vivantes|agaplesion|ameos|atos|sana |diakonie|diakovere|caritas|evangelisch|evang\.|kathol|residenz|campus|bundeswehr|fach.rzte|e\.v\.|co\. kg|.sthetik|aesthetic|surgery|chirurgia|esthetica|ethianum|medcenter|lubinus|dorow|beauty|lacomed|lipoedem|policum|standort|filiale|tagesklinik|fachklinik|medizinisch|operationszentrum|op.zentrum|med.plast|chirurgen|aasee|vital.residenz|park.clinic|stift )'
         """)
         if cur.rowcount:
             logger.info(f"Deleted {cur.rowcount} institution records mistakenly saved as doctors")

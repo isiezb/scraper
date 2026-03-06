@@ -167,45 +167,20 @@ def run_all():
     except Exception as e:
         logger.error(f"Dedup failed: {e}")
 
-    # One-time cleanup v2: reset progress + delete corrupted "Mehr Details" record
+    # One-time cleanup v41: reset VDÄPC + ArztAuskunft so they actually run
     try:
         from db import get_conn
         conn = get_conn()
         cur = conn.cursor()
-        # Reset progress for Berlin, Brandenburg, ArztAuskunft, and enrichment
-        # v38: re-run after dedup fix (was merging different doctors with same name in different cities)
+        # v41: reset VDÄPC (was marked completed but never processed members)
+        # and ArztAuskunft (previous run only got 89 doctors due to transient 404)
         cur.execute("""
             DELETE FROM scraper_progress
-            WHERE (scraper = 'aerztekammer_de' AND source_key IN ('kammer_AEKB', 'kammer_LAEKB'))
-               OR (scraper = 'arztauskunft_de')
-               OR (scraper = 'profile_enrichment')
+            WHERE scraper = 'vdaepc'
+               OR scraper = 'arztauskunft_de'
         """)
         if cur.rowcount:
-            logger.info(f"Reset {cur.rowcount} stale progress entries (Berlin/Brandenburg/ArztAuskunft)")
-        # Delete corrupted record from old ArztAuskunft bug
-        cur.execute("DELETE FROM aerzte WHERE vorname = 'Mehr' AND nachname = 'Details'")
-        if cur.rowcount:
-            logger.info(f"Deleted {cur.rowcount} corrupted 'Mehr Details' record(s)")
-        # Delete institution records scraped as doctors
-        cur.execute("""
-            DELETE FROM aerzte WHERE source = 'arztauskunft_de'
-            AND (LOWER(vorname) || ' ' || LOWER(nachname)) ~*
-                E'(klinik|kliniken|krankenhaus|hospital|clinic|clinicum|praxis|zentrum|center|centrum|institut|universit|berufsgen|gemeinschaftspraxis|mvz|gmbh|ggmbh|gbr|stiftung|akademie|ambulanz|abteilung|bergmannsheil|charit|asklepios|helios|vivantes|agaplesion|ameos|atos|sana |diakonie|diakovere|caritas|evangelisch|evang\\.|kathol|residenz|campus|bundeswehr|fach.rzte|e\\.v\\.|co\\. kg|.sthetik|aesthetic|surgery|chirurgia|esthetica|ethianum|medcenter|lubinus|dorow|beauty|lacomed|lipoedem|policum|standort|filiale|tagesklinik|fachklinik|medizinisch|operationszentrum|op.zentrum|med.plast|chirurgen|aasee|vital.residenz|park.clinic|stift|ev .stift)'
-        """)
-        if cur.rowcount:
-            logger.info(f"Deleted {cur.rowcount} institution records mistakenly saved as doctors")
-        # Fix mojibake in city names (UTF-8 decoded as Latin-1)
-        cur.execute("UPDATE aerzte SET stadt = REPLACE(stadt, 'Ã¶', 'ö') WHERE stadt LIKE '%Ã¶%'")
-        cur.execute("UPDATE aerzte SET stadt = REPLACE(stadt, 'Ã¼', 'ü') WHERE stadt LIKE '%Ã¼%'")
-        cur.execute("UPDATE aerzte SET stadt = REPLACE(stadt, 'Ã¤', 'ä') WHERE stadt LIKE '%Ã¤%'")
-        cur.execute("UPDATE aerzte SET stadt = REPLACE(stadt, 'Ã\x9f', 'ß') WHERE stadt LIKE '%Ã\x9f%'")
-        cur.execute("UPDATE aerzte SET stadt = REPLACE(stadt, 'Ã', 'Ü') WHERE stadt LIKE '%Ã%'")
-        # Also fix in vorname/nachname
-        for col in ('vorname', 'nachname', 'stadt', 'strasse'):
-            cur.execute(f"UPDATE aerzte SET {col} = REPLACE({col}, 'Ã¶', 'ö') WHERE {col} LIKE '%Ã¶%'")
-            cur.execute(f"UPDATE aerzte SET {col} = REPLACE({col}, 'Ã¼', 'ü') WHERE {col} LIKE '%Ã¼%'")
-            cur.execute(f"UPDATE aerzte SET {col} = REPLACE({col}, 'Ã¤', 'ä') WHERE {col} LIKE '%Ã¤%'")
-        logger.info("Fixed mojibake encoding in city/name fields")
+            logger.info(f"Reset {cur.rowcount} progress entries (VDÄPC + ArztAuskunft)")
         conn.commit()
         cur.close()
         conn.close()
@@ -224,14 +199,19 @@ def run_all():
     # Phase 1b: Browser-based scrapers (sequential, use Playwright)
     logger.info("Phase 1b: Running browser-based scrapers...")
     for scraper_cls in BROWSER_SCRAPERS:
-        scraper = scraper_cls()
+        scraper = None
         try:
+            logger.info(f"Initializing {scraper_cls.__name__}...")
+            scraper = scraper_cls()
             logger.info(f"Running {scraper.name}...")
             scraper.run()
+            logger.info(f"Finished {scraper.name}")
         except Exception as e:
-            logger.error(f"{scraper.name} failed: {e}")
+            import traceback
+            logger.error(f"{scraper_cls.__name__} failed: {e}\n{traceback.format_exc()}")
         finally:
-            scraper.close()
+            if scraper:
+                scraper.close()
 
     # Phase 2: Enrichment scrapers (sequential, need Phase 1 data)
     logger.info("Phase 2: Running enrichment scrapers...")

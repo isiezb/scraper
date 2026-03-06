@@ -55,8 +55,16 @@ class ArztAuskunftScraper(BaseScraper):
             try:
                 resp = self.session.get(url, timeout=30)
                 if resp.status_code == 404:
-                    self.logger.info(f"  {label} page {page}: 404, done")
-                    break
+                    if page == 1:
+                        self.logger.error(f"  {label} page 1 returned 404 — site may be down")
+                        break
+                    # Retry once after a delay (transient 404s happen)
+                    self.logger.warning(f"  {label} page {page}: 404, retrying after delay...")
+                    time.sleep(10)
+                    resp = self.session.get(url, timeout=30)
+                    if resp.status_code == 404:
+                        self.logger.info(f"  {label} page {page}: still 404, done")
+                        break
                 resp.raise_for_status()
             except Exception as e:
                 self.logger.error(f"  {label} page {page} fetch failed: {e}")

@@ -69,16 +69,20 @@ def _run_scraper(scraper_cls):
 
 
 def _dedup_existing():
-    """Remove duplicate doctor records, keeping the one with the most data."""
+    """Remove duplicate doctor records, keeping the one with the most data.
+
+    Only merges records that share the same name AND same city (or same PLZ).
+    Two doctors with the same name in different cities are kept as separate records.
+    """
     from db import get_conn
     conn = get_conn()
     cur = conn.cursor()
 
-    # Find duplicate name groups
+    # Find duplicate name+city groups (same name AND same city = likely same person)
     cur.execute("""
-        SELECT LOWER(vorname), LOWER(nachname)
+        SELECT LOWER(vorname), LOWER(nachname), LOWER(COALESCE(stadt, ''))
         FROM aerzte
-        GROUP BY LOWER(vorname), LOWER(nachname)
+        GROUP BY LOWER(vorname), LOWER(nachname), LOWER(COALESCE(stadt, ''))
         HAVING COUNT(*) > 1
     """)
     dupes = cur.fetchall()
@@ -90,8 +94,7 @@ def _dedup_existing():
         return
 
     total_removed = 0
-    for vorname, nachname in dupes:
-        # Get all records for this name, ordered by most data (non-null columns) desc
+    for vorname, nachname, stadt in dupes:
         cur.execute("""
             SELECT id, plz, telefon, website_url, verified,
                    (CASE WHEN plz IS NOT NULL THEN 1 ELSE 0 END +
@@ -103,8 +106,9 @@ def _dedup_existing():
                     CASE WHEN verified = TRUE THEN 5 ELSE 0 END) AS score
             FROM aerzte
             WHERE LOWER(vorname) = %s AND LOWER(nachname) = %s
+              AND LOWER(COALESCE(stadt, '')) = %s
             ORDER BY score DESC, id ASC
-        """, (vorname, nachname))
+        """, (vorname, nachname, stadt))
         records = cur.fetchall()
 
         if len(records) <= 1:
@@ -126,7 +130,7 @@ def _dedup_existing():
 
     conn.commit()
     cur.close()
-    logger.info(f"Dedup: removed {total_removed} duplicate records from {len(dupes)} name groups")
+    logger.info(f"Dedup: removed {total_removed} duplicate records from {len(dupes)} name+city groups")
 
     # Dedup spezialisierungen: remove duplicate (arzt_id, eingriff) keeping lowest id
     cur = conn.cursor()
@@ -160,11 +164,13 @@ def run_all():
         from db import get_conn
         conn = get_conn()
         cur = conn.cursor()
-        # Reset progress for Berlin, Brandenburg, and ArztAuskunft
+        # Reset progress for Berlin, Brandenburg, ArztAuskunft, and enrichment
+        # v38: re-run after dedup fix (was merging different doctors with same name in different cities)
         cur.execute("""
             DELETE FROM scraper_progress
             WHERE (scraper = 'aerztekammer_de' AND source_key IN ('kammer_AEKB', 'kammer_LAEKB'))
                OR (scraper = 'arztauskunft_de')
+               OR (scraper = 'profile_enrichment')
         """)
         if cur.rowcount:
             logger.info(f"Reset {cur.rowcount} stale progress entries (Berlin/Brandenburg/ArztAuskunft)")

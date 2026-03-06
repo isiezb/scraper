@@ -300,7 +300,22 @@ class BaseScraper(ABC):
                 cur.close()
                 return None, None
 
-        # No PLZ on candidate — if exactly 1 name match exists, safe to update
+        # No PLZ on candidate — try city matching
+        if data.get("stadt") and len(name_matches) > 1:
+            cur2 = self.conn.cursor()
+            cur2.execute(
+                """SELECT id, verified FROM aerzte
+                   WHERE LOWER(nachname) = LOWER(%s) AND LOWER(vorname) = LOWER(%s)
+                   AND LOWER(stadt) = LOWER(%s)""",
+                (data["nachname"], data["vorname"], data["stadt"]),
+            )
+            city_matches = cur2.fetchall()
+            cur2.close()
+            if len(city_matches) == 1:
+                cur.close()
+                return city_matches[0][0], city_matches[0][1] or False
+
+        # If exactly 1 name match exists, safe to update
         if len(name_matches) == 1:
             cur.close()
             return name_matches[0][0], name_matches[0][1] or False

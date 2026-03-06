@@ -153,6 +153,25 @@ def run_all():
     except Exception as e:
         logger.error(f"Dedup failed: {e}")
 
+    # One-time reset: Berlin, Brandenburg, and old ArztAuskunft progress
+    # (previous run marked them completed despite saving 0 doctors)
+    try:
+        from db import get_conn
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            DELETE FROM scraper_progress
+            WHERE (scraper = 'aerztekammer_de' AND source_key IN ('kammer_AEKB', 'kammer_LAEKB'))
+               OR (scraper = 'arztauskunft_de')
+        """)
+        if cur.rowcount:
+            logger.info(f"Reset {cur.rowcount} stale progress entries (Berlin/Brandenburg/ArztAuskunft)")
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Progress reset failed: {e}")
+
     # Phase 1: Run main scrapers in parallel
     logger.info("Phase 1: Running main scrapers in parallel...")
     with ThreadPoolExecutor(max_workers=3) as executor:

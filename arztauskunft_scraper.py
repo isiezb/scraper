@@ -1,19 +1,19 @@
 """Scraper for Arzt-Auskunft (Stiftung Gesundheit) — comprehensive DE doctor database.
 
-Uses Playwright to render the Vue.js results page at arzt-auskunft.de.
-This is the most comprehensive source: claims to have ALL ~400,000 German doctors.
-Specialty codes: ots::246 (Plastische Chirurgie), ots::2330 (Plastische, Rekonstruktive und Ästhetische Chirurgie)
+Uses server-rendered listing pages at arzt-auskunft.de/plastische-chirurgie/.
+2,275+ plastic surgeons nationwide. No Playwright needed — plain HTML.
 """
 
 import re
 import time
-import random
+from bs4 import BeautifulSoup
 from base_scraper import BaseScraper
 
 
-SPECIALTIES = [
-    {"code": "ots::246", "label": "Plastische Chirurgie"},
-    {"code": "ots::2330", "label": "Plastische, Rekonstruktive und Ästhetische Chirurgie"},
+# Specialty listing paths on arzt-auskunft.de
+SPECIALTY_PATHS = [
+    {"path": "plastische-chirurgie", "label": "Plastische Chirurgie"},
+    {"path": "plastische-und-aesthetische-chirurgie", "label": "Plastische und Ästhetische Chirurgie"},
 ]
 
 BASE_URL = "https://www.arzt-auskunft.de"
@@ -24,173 +24,122 @@ class ArztAuskunftScraper(BaseScraper):
     min_delay = 2.0
     max_delay = 4.0
 
-    def __init__(self):
-        super().__init__()
-        self._browser = None
-        self._page = None
-        self._playwright = None
-
-    def _init_browser(self):
-        if self._browser:
-            return True
-        try:
-            from playwright.sync_api import sync_playwright
-            self._playwright = sync_playwright().start()
-            self._browser = self._playwright.chromium.launch(headless=True)
-            self._page = self._browser.new_page()
-            self._page.set_extra_http_headers({
-                "Accept-Language": "de-DE,de;q=0.9",
-            })
-            self.logger.info("Playwright browser initialized for Arzt-Auskunft")
-            return True
-        except ImportError:
-            self.logger.warning("Playwright not available — cannot scrape arzt-auskunft.de")
-            return False
-        except Exception as e:
-            self.logger.error(f"Failed to init Playwright: {e}")
-            return False
-
-    def close(self):
-        if self._browser:
-            self._browser.close()
-            self._playwright.stop()
-        super().close()
-
     def run(self):
-        if not self._init_browser():
-            return
-
-        for spec in SPECIALTIES:
-            progress_key = f"arztauskunft_{spec['code']}"
-            _, completed = self.get_progress(progress_key)
+        for spec in SPECIALTY_PATHS:
+            progress_key = f"arztauskunft_{spec['path']}"
+            last_page, completed = self.get_progress(progress_key)
             if completed:
                 self.logger.info(f"Skipping {spec['label']} (already completed)")
                 continue
 
             try:
-                count = self._scrape_specialty(spec)
+                count = self._scrape_specialty(spec, start_page=last_page or 1)
                 self.save_progress(progress_key, count, completed=True)
             except Exception as e:
                 self.logger.error(f"Failed {spec['label']}: {e}")
 
         self.finalize()
 
-    def _scrape_specialty(self, spec: dict) -> int:
-        """Scrape all doctors for a given specialty code."""
-        code = spec["code"]
+    def _scrape_specialty(self, spec: dict, start_page: int = 1) -> int:
+        """Scrape all listing pages for a specialty."""
+        path = spec["path"]
         label = spec["label"]
-        url = f"{BASE_URL}/ergebnis?FRT={code}&form=fs1"
-
-        self.logger.info(f"Loading {label}: {url}")
-        self._page.goto(url, wait_until="networkidle", timeout=60000)
-
-        # Wait for results or "no results" message
-        try:
-            self._page.wait_for_selector(
-                ".result-card, .no-results, .ergebnis-card, .arzt-card, [class*='result']",
-                timeout=30000,
-            )
-        except Exception:
-            self.logger.warning(f"No result elements found for {label}, trying to wait longer...")
-            time.sleep(5)
-
         count = 0
-        page_num = 1
-        max_pages = 100  # Safety limit
+        page = start_page
+        max_pages = 50  # Safety limit
 
-        while page_num <= max_pages:
-            # Extract doctor cards from current page
-            cards = self._extract_cards()
-            if not cards:
-                self.logger.info(f"  {label} page {page_num}: no more cards")
+        while page <= max_pages:
+            url = f"{BASE_URL}/{path}/" if page == 1 else f"{BASE_URL}/{path}/{page}/"
+            self.logger.info(f"  {label} page {page}: {url}")
+
+            try:
+                resp = self.session.get(url, timeout=30)
+                if resp.status_code == 404:
+                    self.logger.info(f"  {label} page {page}: 404, done")
+                    break
+                resp.raise_for_status()
+            except Exception as e:
+                self.logger.error(f"  {label} page {page} fetch failed: {e}")
                 break
 
-            self.logger.info(f"  {label} page {page_num}: {len(cards)} doctors")
+            soup = BeautifulSoup(resp.text, "lxml")
 
-            for card in cards:
+            # Find all profile links
+            profile_links = soup.select('a[href*="/arzt/"]')
+            if not profile_links:
+                self.logger.info(f"  {label} page {page}: no profile links, done")
+                break
+
+            # Deduplicate links on the page
+            seen_urls = set()
+            unique_links = []
+            for link in profile_links:
+                href = link.get("href", "")
+                if href and href not in seen_urls and "/arzt/" in href:
+                    seen_urls.add(href)
+                    unique_links.append(link)
+
+            self.logger.info(f"  {label} page {page}: {len(unique_links)} doctors")
+
+            for link in unique_links:
                 try:
-                    doctor = self._parse_card(card)
+                    doctor = self._parse_listing_entry(link)
                     if doctor:
-                        doctor["land"] = "DE"
                         self.upsert_arzt(doctor)
                         count += 1
                 except Exception as e:
-                    self.logger.error(f"  Failed parsing card: {e}")
+                    self.logger.error(f"  Failed parsing entry: {e}")
 
-            # Try to go to next page
-            if not self._click_next_page():
-                break
+            # Save progress after each page
+            self.save_progress(f"arztauskunft_{spec['path']}", page)
 
-            page_num += 1
+            page += 1
             self.wait()
 
         self.logger.info(f"  {label}: {count} doctors total")
         return count
 
-    def _extract_cards(self) -> list[dict]:
-        """Extract doctor data from the current page using JavaScript."""
-        try:
-            cards = self._page.evaluate("""() => {
-                const results = [];
-                // Try multiple selectors for result cards
-                const selectors = [
-                    '.result-card', '.ergebnis-card', '.arzt-card',
-                    '[class*="result-item"]', '[class*="doctor-card"]',
-                    '.card', '.list-group-item'
-                ];
-
-                let elements = [];
-                for (const sel of selectors) {
-                    elements = document.querySelectorAll(sel);
-                    if (elements.length > 0) break;
-                }
-
-                // If no cards found via selectors, try to find any structured result elements
-                if (elements.length === 0) {
-                    // Look for links to /arzt/ profile pages
-                    const profileLinks = document.querySelectorAll('a[href*="/arzt/"]');
-                    for (const link of profileLinks) {
-                        const card = link.closest('div') || link.parentElement;
-                        if (card && !results.some(r => r.name === link.textContent.trim())) {
-                            results.push({
-                                name: link.textContent.trim(),
-                                url: link.href,
-                                html: card.innerHTML
-                            });
-                        }
-                    }
-                    return results;
-                }
-
-                for (const el of elements) {
-                    const nameEl = el.querySelector('h2, h3, h4, .name, [class*="name"]');
-                    const addressEl = el.querySelector('.address, [class*="address"], [class*="location"]');
-                    const specEl = el.querySelector('.specialty, [class*="specialty"], [class*="fach"]');
-                    const linkEl = el.querySelector('a[href*="/arzt/"]');
-
-                    results.push({
-                        name: nameEl ? nameEl.textContent.trim() : '',
-                        address: addressEl ? addressEl.textContent.trim() : '',
-                        specialty: specEl ? specEl.textContent.trim() : '',
-                        url: linkEl ? linkEl.href : '',
-                        html: el.innerHTML.substring(0, 2000)
-                    });
-                }
-                return results;
-            }""")
-            return cards or []
-        except Exception as e:
-            self.logger.error(f"  Failed extracting cards: {e}")
-            return []
-
-    def _parse_card(self, card: dict) -> dict | None:
-        """Parse a doctor card extracted from the page."""
-        name = card.get("name", "").strip()
-        if not name or len(name) < 4:
+    def _parse_listing_entry(self, link_el) -> dict | None:
+        """Parse a doctor from a listing page link and its surrounding context."""
+        href = link_el.get("href", "")
+        if not href or "/arzt/" not in href:
             return None
 
-        # Extract name parts
-        name_data = self._extract_name_from_text(name)
+        # Make URL absolute
+        if href.startswith("/"):
+            href = BASE_URL + href
+
+        # Extract info from URL slug:
+        # /arzt/plastische-chirurgie/berlin/dr-firstname-lastname-1234567
+        url_match = re.search(r"/arzt/[^/]+/([^/]+)/([^/]+?)(?:-(\d{5,}))?\s*$", href)
+        if not url_match:
+            return None
+
+        city_slug = url_match.group(1)
+        name_slug = url_match.group(2)
+
+        # Get the display name from the link text or surrounding card
+        display_name = link_el.get_text(strip=True)
+
+        # Try to get more context from the parent card/container
+        card = link_el.parent
+        # Walk up to find a container with more content
+        for _ in range(5):
+            if card and card.parent and card.parent.name not in ("body", "html", "[document]"):
+                text_len = len(card.get_text(strip=True))
+                if text_len > len(display_name) + 20:
+                    break
+                card = card.parent
+            else:
+                break
+
+        card_text = card.get_text("\n", strip=True) if card else ""
+
+        # Parse the display name
+        name_data = self._extract_name(display_name)
+        if not name_data:
+            # Fallback: parse from URL slug
+            name_data = self._name_from_slug(name_slug)
         if not name_data:
             return None
 
@@ -200,65 +149,38 @@ class ArztAuskunftScraper(BaseScraper):
             "ist_facharzt": True,
             "verified": True,
             "source": "arztauskunft_de",
+            "quelle_url": href,
+            "land": "DE",
         }
 
-        # Parse address
-        address = card.get("address", "")
-        if address:
-            plz_match = re.search(r"(\d{5})\s+(.+)", address)
-            if plz_match:
-                doctor["plz"] = plz_match.group(1)
-                doctor["stadt"] = plz_match.group(2).strip()
+        # Extract city from URL slug
+        city = city_slug.replace("-", " ").title()
+        # Fix common city name issues
+        city = re.sub(r"\bUe\b", "Ü", city)
+        city = re.sub(r"\bOe\b", "Ö", city)
+        city = re.sub(r"\bAe\b", "Ä", city)
+        doctor["stadt"] = city
 
-            street_match = re.match(r"(.+?)\s+\d{5}", address)
-            if street_match:
-                doctor["strasse"] = street_match.group(1).strip()
+        # Try to extract address from card text
+        self._extract_address(card_text, doctor)
 
-        # Parse HTML for additional details
-        html = card.get("html", "")
-        if html:
-            phone_match = re.search(r"(?:Tel|Telefon)[.:\s]+([0-9\s/\-()]+)", html)
-            if phone_match:
-                doctor["telefon"] = phone_match.group(1).strip()
-
-            email_match = re.search(r"mailto:([^\"']+)", html)
-            if email_match:
-                doctor["email"] = email_match.group(1).strip()
-
-        # Profile URL
-        url = card.get("url", "")
-        if url:
-            doctor["quelle_url"] = url
+        # Try to extract phone from card text
+        phone_match = re.search(r"(?:Tel|Telefon)[.:\s]+([0-9\s/\-()]+)", card_text)
+        if phone_match:
+            doctor["telefon"] = phone_match.group(1).strip()
 
         return doctor
 
-    def _click_next_page(self) -> bool:
-        """Try to click the next page button. Returns True if successful."""
-        try:
-            next_btn = self._page.query_selector(
-                'a[rel="next"], .pagination .next a, [class*="next-page"], '
-                'button:has-text("Weiter"), a:has-text("Weiter"), '
-                'a:has-text("nächste"), .pagination li:last-child a'
-            )
-            if next_btn and next_btn.is_visible():
-                next_btn.click()
-                self._page.wait_for_load_state("networkidle", timeout=15000)
-                time.sleep(1)
-                return True
-        except Exception:
-            pass
-        return False
-
-    def _extract_name_from_text(self, text: str) -> dict | None:
-        """Extract titel, vorname, nachname from a text string."""
+    def _extract_name(self, text: str) -> dict | None:
+        """Extract titel, vorname, nachname from display name."""
         text = text.strip()
-        if not text:
+        if not text or len(text) < 4:
             return None
 
-        # Remove common prefixes
+        # Remove salutation
         text = re.sub(r"^(Herr|Frau|Arzt|Ärztin)\s+", "", text, flags=re.IGNORECASE)
 
-        # Extract title parts
+        # Split into title and name parts
         title_parts = []
         name_parts = []
         for word in text.split():
@@ -274,8 +196,49 @@ class ArztAuskunftScraper(BaseScraper):
         if len(name_parts) < 2:
             return None
 
-        titel = " ".join(title_parts) if title_parts else None
-        vorname = name_parts[0]
-        nachname = " ".join(name_parts[1:])
+        return {
+            "titel": " ".join(title_parts) if title_parts else None,
+            "vorname": name_parts[0],
+            "nachname": " ".join(name_parts[1:]),
+        }
 
-        return {"titel": titel, "vorname": vorname, "nachname": nachname}
+    def _name_from_slug(self, slug: str) -> dict | None:
+        """Fallback: extract name from URL slug like 'dr-med-firstname-lastname'."""
+        parts = slug.split("-")
+        title_words = {"dr", "med", "prof", "priv", "doz", "dent", "habil", "dipl", "univ"}
+
+        title_parts = []
+        name_parts = []
+        for p in parts:
+            if p.lower() in title_words:
+                title_parts.append(p.capitalize() + ".")
+            else:
+                name_parts.append(p.capitalize())
+
+        if len(name_parts) < 2:
+            return None
+
+        return {
+            "titel": " ".join(title_parts) if title_parts else None,
+            "vorname": name_parts[0],
+            "nachname": " ".join(name_parts[1:]),
+        }
+
+    def _extract_address(self, text: str, doctor: dict):
+        """Try to extract PLZ and street from card text."""
+        # Look for German PLZ pattern (5 digits + city)
+        plz_match = re.search(r"(\d{5})\s+(\S.+?)(?:\n|$)", text)
+        if plz_match:
+            doctor["plz"] = plz_match.group(1)
+            # City might already be set from URL, but text version is more accurate
+            city_text = plz_match.group(2).strip()
+            if city_text and len(city_text) > 2:
+                doctor["stadt"] = city_text
+
+        # Street: line before the PLZ
+        street_match = re.search(r"(?:^|\n)(.+?)\n\s*\d{5}", text)
+        if street_match:
+            street = street_match.group(1).strip()
+            # Sanity check: streets usually contain a number
+            if re.search(r"\d", street) and len(street) < 80:
+                doctor["strasse"] = street

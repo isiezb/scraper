@@ -1,206 +1,299 @@
 """Scraper for KBV / 116117.de (Germany — GKV-Zulassung).
 
-Uses the JSON API at arztsuche.116117.de to find GKV-zugelassene Ärzte.
+Uses the internal JSON API at arztsuche.116117.de to find GKV-zugelassene Ärzte
+with plastic/aesthetic surgery specializations.
 After scraping, merges with Ärztekammer data: doctors found only in
 Ärztekammer (not in KBV) get gkv_zugelassen = false.
 """
 
-import re
+import base64
+import random
+import time
 from datetime import datetime, timezone
 from base_scraper import BaseScraper, generate_slug
 
-# 116117 Arztsuche API endpoint
-API_BASE = "https://arztsuche.116117.de/api"
-LOCATION_URL = f"{API_BASE}/location"
+API_URL = "https://arztsuche.116117.de/api/data"
+API_USER = "bdps"
+API_PASS = "fkr493mvg_f"
 
-# Relevant Fachgruppen codes for aesthetic/plastic surgery
-FACHGRUPPEN = [
-    {"code": "51", "name": "Plastische Chirurgie", "kategorie": "koerper"},
-    {"code": "52", "name": "Plastische und Ästhetische Chirurgie", "kategorie": "koerper"},
-    {"code": "11", "name": "Chirurgie", "kategorie": "koerper"},
-    {"code": "14", "name": "Dermatologie", "kategorie": "minimal_invasiv"},
-    {"code": "34", "name": "Mund-Kiefer-Gesichtschirurgie", "kategorie": "gesicht"},
-    {"code": "16", "name": "Hals-Nasen-Ohren-Heilkunde", "kategorie": "gesicht"},
+# Filter definitions matching the 116117 API's internal codes
+# fgf = Fachgebiet (specific specialty), zbk = Zusatzqualifikation
+SEARCH_FILTERS = [
+    {
+        "label": "Plastische Chirurgie",
+        "kategorie": "koerper",
+        "filters": [{"title": "Fachgebiet", "fieldName": "fgf", "selectedCodes": ["322"]}],
+    },
+    {
+        "label": "Plastische und Ästhetische Operationen (ZBK)",
+        "kategorie": "koerper",
+        "filters": [{"title": "Zusatzqualifikation", "fieldName": "zbk", "selectedCodes": ["175"]}],
+    },
+    {
+        "label": "Mund-Kiefer-Gesichtschirurgie",
+        "kategorie": "gesicht",
+        "filters": [{"title": "Fachgebiet Kategorie", "fieldName": "fgg", "selectedCodes": ["24"]}],
+    },
 ]
 
-# PLZ ranges to iterate for full DE coverage (first 2 digits)
-# Ensures no gaps between city-based radius searches
-PLZ_PREFIXES = [f"{i:02d}" for i in range(1, 100)]
-
-# Major German cities with coordinates for radius search
+# Search grid: German cities spaced ~100km apart for full coverage
 SEARCH_LOCATIONS = [
-    {"name": "Berlin", "lat": 52.520, "lon": 13.405, "bundesland": "Berlin"},
-    {"name": "Hamburg", "lat": 53.551, "lon": 9.994, "bundesland": "Hamburg"},
-    {"name": "München", "lat": 48.137, "lon": 11.576, "bundesland": "Bayern"},
-    {"name": "Köln", "lat": 50.938, "lon": 6.960, "bundesland": "Nordrhein-Westfalen"},
-    {"name": "Frankfurt", "lat": 50.110, "lon": 8.682, "bundesland": "Hessen"},
-    {"name": "Stuttgart", "lat": 48.776, "lon": 9.183, "bundesland": "Baden-Württemberg"},
-    {"name": "Düsseldorf", "lat": 51.228, "lon": 6.774, "bundesland": "Nordrhein-Westfalen"},
-    {"name": "Leipzig", "lat": 51.340, "lon": 12.375, "bundesland": "Sachsen"},
-    {"name": "Dresden", "lat": 51.051, "lon": 13.738, "bundesland": "Sachsen"},
-    {"name": "Hannover", "lat": 52.376, "lon": 9.732, "bundesland": "Niedersachsen"},
-    {"name": "Nürnberg", "lat": 49.452, "lon": 11.077, "bundesland": "Bayern"},
-    {"name": "Dortmund", "lat": 51.514, "lon": 7.468, "bundesland": "Nordrhein-Westfalen"},
-    {"name": "Bremen", "lat": 53.080, "lon": 8.801, "bundesland": "Bremen"},
-    {"name": "Essen", "lat": 51.457, "lon": 7.012, "bundesland": "Nordrhein-Westfalen"},
-    {"name": "Freiburg", "lat": 47.999, "lon": 7.842, "bundesland": "Baden-Württemberg"},
-    {"name": "Rostock", "lat": 54.092, "lon": 12.099, "bundesland": "Mecklenburg-Vorpommern"},
-    {"name": "Kiel", "lat": 54.323, "lon": 10.123, "bundesland": "Schleswig-Holstein"},
-    {"name": "Saarbrücken", "lat": 49.234, "lon": 6.997, "bundesland": "Saarland"},
-    {"name": "Erfurt", "lat": 50.978, "lon": 11.029, "bundesland": "Thüringen"},
-    {"name": "Magdeburg", "lat": 52.121, "lon": 11.628, "bundesland": "Sachsen-Anhalt"},
-    {"name": "Potsdam", "lat": 52.391, "lon": 13.064, "bundesland": "Brandenburg"},
-    {"name": "Mainz", "lat": 49.993, "lon": 8.247, "bundesland": "Rheinland-Pfalz"},
+    {"name": "Berlin", "lat": 52.520, "lon": 13.405},
+    {"name": "Hamburg", "lat": 53.551, "lon": 9.994},
+    {"name": "München", "lat": 48.137, "lon": 11.576},
+    {"name": "Köln", "lat": 50.938, "lon": 6.960},
+    {"name": "Frankfurt", "lat": 50.110, "lon": 8.682},
+    {"name": "Stuttgart", "lat": 48.776, "lon": 9.183},
+    {"name": "Düsseldorf", "lat": 51.228, "lon": 6.774},
+    {"name": "Leipzig", "lat": 51.340, "lon": 12.375},
+    {"name": "Dresden", "lat": 51.051, "lon": 13.738},
+    {"name": "Hannover", "lat": 52.376, "lon": 9.732},
+    {"name": "Nürnberg", "lat": 49.452, "lon": 11.077},
+    {"name": "Dortmund", "lat": 51.514, "lon": 7.468},
+    {"name": "Bremen", "lat": 53.080, "lon": 8.801},
+    {"name": "Essen", "lat": 51.457, "lon": 7.012},
+    {"name": "Freiburg", "lat": 47.999, "lon": 7.842},
+    {"name": "Rostock", "lat": 54.092, "lon": 12.099},
+    {"name": "Kiel", "lat": 54.323, "lon": 10.123},
+    {"name": "Saarbrücken", "lat": 49.234, "lon": 6.997},
+    {"name": "Erfurt", "lat": 50.978, "lon": 11.029},
+    {"name": "Magdeburg", "lat": 52.121, "lon": 11.628},
+    {"name": "Potsdam", "lat": 52.391, "lon": 13.064},
+    {"name": "Mainz", "lat": 49.993, "lon": 8.247},
+    {"name": "Kassel", "lat": 51.313, "lon": 9.497},
+    {"name": "Augsburg", "lat": 48.366, "lon": 10.899},
+    {"name": "Regensburg", "lat": 49.013, "lon": 12.102},
+    {"name": "Würzburg", "lat": 49.794, "lon": 9.929},
+    {"name": "Mannheim", "lat": 49.489, "lon": 8.467},
+    {"name": "Ulm", "lat": 48.402, "lon": 9.988},
+    {"name": "Oldenburg", "lat": 53.143, "lon": 8.214},
+    {"name": "Göttingen", "lat": 51.534, "lon": 9.935},
 ]
+
+
+def _gen_req_val(lat: float, lon: float) -> str:
+    """Generate the req-val header (anti-bot token) for LATLON requests."""
+    lat2 = lat + 1.1
+    lon2 = lon + 2.3
+    ts = str(int(time.time() * 1000))
+    int_lat = str(lat2).split(".")[0]
+    frac_lat = str(lat2).split(".")[1][0] if "." in str(lat2) else "0"
+    int_lon = str(lon2).split(".")[0]
+    frac_lon = str(lon2).split(".")[1][0] if "." in str(lon2) else "0"
+    token = (
+        int_lat[-1] + ts[-1] + int_lon[-1] + ts[-2] + frac_lat + ts[-3] + frac_lon
+    )
+    return base64.b64encode(token.encode()).decode()
 
 
 class KBVScraper(BaseScraper):
     name = "kbv_116117"
-    min_delay = 0.5
-    max_delay = 1.5
+    min_delay = 2.0
+    max_delay = 4.0
 
     def __init__(self):
         super().__init__()
         self.seen_slugs = set()
-        self.kbv_doctor_ids = set()  # Track all doctor IDs found in KBV
+        self._consecutive_errors = 0
+        self._init_session()
+
+    def _init_session(self):
+        """Visit the main page to obtain session cookies before API calls."""
+        try:
+            self.session.headers.update({
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            })
+            self.session.get("https://arztsuche.116117.de", timeout=15)
+            self.logger.info("Session initialized with cookies from main page")
+        except Exception as e:
+            self.logger.warning(f"Could not initialize session cookies: {e}")
 
     def run(self):
-        # Phase 1: Search by location
-        location_found = 0
-        for fachgruppe in FACHGRUPPEN:
-            self.logger.info(f"Searching 116117 for: {fachgruppe['name']}")
-            for location in SEARCH_LOCATIONS:
+        total_before = self.stats["neu"]
+
+        for search_def in SEARCH_FILTERS:
+            label = search_def["label"]
+            self.logger.info(f"Searching 116117 for: {label}")
+
+            for loc in SEARCH_LOCATIONS:
+                progress_key = f"{label}_{loc['name']}"
+                _, completed = self.get_progress(progress_key)
+                if completed:
+                    continue
+
                 try:
-                    self._search_location(fachgruppe, location)
+                    count = self._search(search_def, loc)
+                    if count is not None:
+                        self.save_progress(progress_key, count, completed=True)
                 except Exception as e:
-                    self.logger.error(f"Failed {fachgruppe['name']} in {location['name']}: {e}")
+                    self.logger.error(f"Failed {label} in {loc['name']}: {e}")
+
                 self.wait()
-            location_found += self.stats["neu"]
 
-        # Phase 2: PLZ-based search for gaps (skip if API is not working)
-        if location_found > 0:
-            self.logger.info("Phase 2: PLZ-based gap search")
-            for fachgruppe in FACHGRUPPEN:
-                for prefix in PLZ_PREFIXES:
-                    try:
-                        self._search_plz(fachgruppe, f"{prefix}000")
-                    except Exception as e:
-                        self.logger.error(f"PLZ {prefix}xxx failed: {e}")
-                    self.wait()
-        else:
-            self.logger.warning("Skipping PLZ phase — location phase found 0 doctors (API may be unavailable)")
+            self.logger.info(f"  {label}: {self.stats['neu'] - total_before} new so far")
 
-        # Phase 3: Mark Ärztekammer-only doctors as not GKV-zugelassen
-        self._mark_non_gkv_doctors()
+        # Mark Ärztekammer-only doctors as not GKV-zugelassen
+        if self.stats["neu"] > 0 or self.stats["aktualisiert"] > 0:
+            self._mark_non_gkv_doctors()
 
         self.finalize()
 
-    def _search_location(self, fachgruppe: dict, location: dict):
-        """Search for doctors of a Fachgruppe near a location."""
-        params = {
-            "lat": location["lat"],
-            "lon": location["lon"],
-            "radius": 80,
-            "fachgruppe": fachgruppe["code"],
-            "pageSize": 200,
-            "page": 0,
-        }
+    def _api_post(self, location: dict, search_def: dict, max_retries: int = 3):
+        """POST to 116117 API with retry/backoff for 500 errors."""
+        for attempt in range(max_retries):
+            lat, lon = location["lat"], location["lon"]
+            req_val = _gen_req_val(lat, lon)
 
-        resp = self.fetch(LOCATION_URL, params=params)
-        if not resp:
-            return
+            body = {
+                "r": 100,
+                "locType": "LATLON",
+                "lat": lat,
+                "lon": lon,
+                "plz": None,
+                "osmId": None,
+                "osmType": None,
+                "filterSelections": search_def["filters"],
+                "locOrigin": "USER_INPUT",
+                "searchTrigger": "INITIAL",
+                "viaDeeplink": False,
+            }
+
+            resp = self.session.post(
+                API_URL,
+                json=body,
+                headers={
+                    "req-val": req_val,
+                    "Content-Type": "application/json",
+                    "Origin": "https://arztsuche.116117.de",
+                    "Referer": "https://arztsuche.116117.de/",
+                },
+                auth=(API_USER, API_PASS),
+                timeout=30,
+            )
+
+            if resp.status_code == 200:
+                self._consecutive_errors = 0
+                return resp
+
+            self._consecutive_errors += 1
+            backoff = min(120, 10 * (2 ** attempt)) + random.uniform(0, 5)
+
+            if self._consecutive_errors >= 5:
+                # Likely WAF-blocked — reset session and wait longer
+                self.logger.warning(
+                    f"  {location['name']}: HTTP {resp.status_code}, "
+                    f"{self._consecutive_errors} consecutive errors — "
+                    f"resetting session, waiting {backoff:.0f}s"
+                )
+                self.session.close()
+                import requests as req_lib
+                self.session = req_lib.Session()
+                from base_scraper import USER_AGENTS
+                self.session.headers.update({
+                    "User-Agent": random.choice(USER_AGENTS),
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "de-DE,de;q=0.9,en;q=0.5",
+                })
+                self._init_session()
+                self._consecutive_errors = 0
+                backoff = max(backoff, 60)
+            else:
+                self.logger.warning(
+                    f"  {location['name']}: HTTP {resp.status_code}, "
+                    f"retry {attempt+1}/{max_retries} in {backoff:.0f}s"
+                )
+
+            time.sleep(backoff)
+
+        return None
+
+    def _search(self, search_def: dict, location: dict) -> int | None:
+        """Search for doctors of a specialty near a location. Returns result count."""
+        resp = self._api_post(location, search_def)
+        if resp is None:
+            self.logger.error(f"  {location['name']}: all retries failed")
+            return None
 
         content_type = resp.headers.get("content-type", "")
         if "json" not in content_type:
-            self.logger.error(f"  Non-JSON response for {location['name']}: {content_type} (first 200 chars: {resp.text[:200]})")
-            return
+            self.logger.error(f"  {location['name']}: non-JSON response: {content_type}")
+            return None
 
-        try:
-            data = resp.json()
-        except Exception:
-            self.logger.error(f"  Failed to parse JSON for {location['name']}")
-            return
+        data = resp.json()
+        praxen = data.get("arztPraxisDatas", [])
+        if not praxen:
+            return 0
 
-        results = data if isinstance(data, list) else data.get("results", data.get("data", data.get("doctors", data.get("arztPraxen", []))))
-        if not results:
-            return
+        more = data.get("moreResults", False)
+        if more:
+            self.logger.warning(
+                f"  {location['name']}: {len(praxen)} results but moreResults=True "
+                f"(some doctors may be missed)"
+            )
 
-        self.logger.info(f"  {location['name']}: {len(results)} results for {fachgruppe['name']}")
-
-        for doctor in results:
+        count = 0
+        for praxis in praxen:
             try:
-                self._process_doctor(doctor, fachgruppe, location)
+                if self._process_doctor(praxis, search_def):
+                    count += 1
             except Exception as e:
-                self.logger.error(f"  Failed processing doctor: {e}")
+                self.logger.error(f"  Failed processing: {e}")
 
-    def _search_plz(self, fachgruppe: dict, plz: str):
-        """Search by PLZ for coverage gaps."""
-        params = {
-            "plz": plz,
-            "fachgruppe": fachgruppe["code"],
-            "pageSize": 200,
-            "page": 0,
-        }
+        if count > 0:
+            self.logger.info(
+                f"  {location['name']}: {len(praxen)} results, {count} new/updated"
+            )
+        return len(praxen)
 
-        resp = self.fetch(LOCATION_URL, params=params)
-        if not resp:
-            return
-
-        try:
-            data = resp.json()
-        except Exception:
-            return
-
-        results = data if isinstance(data, list) else data.get("results", data.get("data", data.get("doctors", [])))
-        if not results:
-            return
-
-        for doctor in results:
-            try:
-                self._process_doctor(doctor, fachgruppe, {"name": plz, "bundesland": None})
-            except Exception:
-                pass
-
-    def _process_doctor(self, data: dict, fachgruppe: dict, location: dict):
-        """Process a single doctor from 116117 API response."""
-        vorname = data.get("vorname", data.get("firstName", ""))
-        nachname = data.get("nachname", data.get("name", data.get("lastName", "")))
+    def _process_doctor(self, data: dict, search_def: dict) -> bool:
+        """Process a single doctor/practice from the 116117 API. Returns True if inserted/updated."""
+        # The API returns one record per practice, with doctor info at top level
+        # arzt=true means it's a doctor (vs. a Praxis entry)
+        vorname = data.get("vorname", "")
+        nachname = data.get("name", "")
         if not vorname or not nachname:
-            return
+            return False
 
-        titel = data.get("titel", data.get("title", ""))
-
-        slug = generate_slug(titel or "", vorname, nachname)
+        titel = data.get("titel", "")
+        slug = generate_slug(titel, vorname, nachname)
         if slug in self.seen_slugs:
-            return
+            return False
         self.seen_slugs.add(slug)
 
-        stadt = data.get("ort", data.get("city", location["name"]))
-        plz = data.get("plz", data.get("zipCode", ""))
-        bundesland = data.get("bundesland", location.get("bundesland"))
-        facharzttitel = data.get("fachgebiet", data.get("fachgruppe", fachgruppe["name"]))
-        telefon = data.get("telefon", data.get("phone", data.get("tel")))
+        anrede = data.get("anrede", "")
+        geschlecht = self._map_gender(data.get("geschlecht", anrede))
 
-        # Store internal source ID if available
-        arztsuche_id = data.get("id", data.get("arztId", data.get("arzt_id")))
+        # Build address from components
+        strasse = data.get("strasse", "")
+        hausnummer = data.get("hausnummer", "")
+        if strasse and hausnummer:
+            strasse = f"{strasse} {hausnummer}"
+
+        # Extract Fachgebiet from ag (Arztgruppen) list
+        facharzttitel = search_def["label"]
+        ag_list = data.get("ag", [])
+        if isinstance(ag_list, list) and ag_list:
+            facharzttitel = ag_list[0].get("value", facharzttitel)
 
         arzt_data = {
             "vorname": vorname,
             "nachname": nachname,
-            "titel": titel or "",
-            "geschlecht": self._map_gender(data.get("geschlecht", data.get("gender"))),
+            "titel": titel,
+            "geschlecht": geschlecht,
             "ist_facharzt": True,
             "facharzttitel": facharzttitel,
             "selbstbezeichnung": facharzttitel,
             "land": "DE",
-            "stadt": stadt,
-            "bundesland": bundesland,
-            "plz": str(plz) if plz else None,
+            "stadt": data.get("ort"),
+            "plz": data.get("plz"),
+            "strasse": strasse or None,
             "seo_slug": slug,
             "datenquelle": "kbv_116117",
-            "quelle_url": LOCATION_URL,
-            "telefon": str(telefon) if telefon else None,
-            "arztsuche_id": str(arztsuche_id) if arztsuche_id else None,
+            "quelle_url": "https://arztsuche.116117.de",
+            "telefon": data.get("tel") or None,
+            "fax": data.get("fax") or None,
+            "email": data.get("email") or None,
+            "website_url": data.get("web") or None,
             "gkv_zugelassen": True,
             "verified": True,
             "source": "kbv",
@@ -208,20 +301,15 @@ class KBVScraper(BaseScraper):
             "last_verified_at": datetime.now(timezone.utc).isoformat(),
         }
 
-        lat = data.get("lat", data.get("latitude"))
-        lon = data.get("lon", data.get("longitude"))
-        if lat and lon:
-            arzt_data["latitude"] = float(lat)
-            arzt_data["longitude"] = float(lon)
-
         arzt_id = self.upsert_arzt(arzt_data)
         if arzt_id:
-            self.kbv_doctor_ids.add(arzt_id)
             self.insert_spezialisierungen(arzt_id, [{
-                "kategorie": fachgruppe["kategorie"],
+                "kategorie": search_def["kategorie"],
                 "eingriff": facharzttitel,
                 "erfahrungslevel": "spezialist",
             }])
+            return True
+        return False
 
     def _mark_non_gkv_doctors(self):
         """Mark Ärztekammer doctors NOT found in KBV as gkv_zugelassen = false."""

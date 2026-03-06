@@ -39,6 +39,7 @@ logger = logging.getLogger("orchestrator")
 PARALLEL_SCRAPERS = [
     MedRegScraper,        # CH: best data, GLN numbers (currently 503)
     AerztekammerScraper,  # DE: all 17 Landesärztekammern + DGPRÄC nationwide
+    KBVScraper,           # DE: 116117.de — nationwide GKV-zugelassene Ärzte
     OEGKScraper,          # AT: OEGK + ÖÄK cross-reference
 ]
 
